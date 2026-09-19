@@ -1,0 +1,26 @@
+# 让 git 自动识别文本/二进制，并在提交时统一行尾
+* text=auto
+
+# 源码与文档：明确按文本处理
+*.c    text
+*.h    text
+*.py   text
+*.md   text
+*.txt  text
+
+# Keil 工程文件：不要动它的行尾（内部多为 GBK 中文注释，转换会制造"整文件都改了"的假 diff）
+*.uvprojx -text
+*.uvoptx  -text
+
+# 二进制：禁止任何转换
+*.pdf  binary
+*.xlsx binary
+*.xls  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.hex  binary
+*.axf  binary
+*.o    binary
+*.lib  binary
