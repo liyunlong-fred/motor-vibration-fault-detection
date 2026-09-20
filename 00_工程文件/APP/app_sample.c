@@ -137,7 +137,11 @@ void app_sample_task(void)
 /* ================= 4、 对外接口 ================= */
 //正常工作调用
 uint8_t app_sample_window_ready(void)               { return (g_ready != 0xFF) ? 1 : 0; }   /* 是否能取————判断是否满窗：满窗返回1，无满窗返回0 */
-const sample_window_t *app_sample_window_get(void)  { return &g_win[g_ready]; }             /* 取数据————返回满窗所在的结构体指针（调用前务必先判断 “g_ready” 是否为 0xFF ） */
+const sample_window_t *app_sample_window_get(void)                                          /* 取数据————返回满窗所在的结构体指针 */
+{
+    if (g_ready == 0xFF) return 0;      /* 没有满窗, 返回空指针 */
+    return &g_win[g_ready];
+}
 void    app_sample_window_release(void)             { g_ready = 0xFF; }                     /* 结束使用————将 “g_ready” 置于默认值 0xFF */
 void    app_sample_pause(uint8_t on)                { g_paused = on; }                      /* 发送前暂停，发送后继续————“on” 为 1 ：app_sample_task暂停采样；“on” 为 0 ：正常采样 */
 

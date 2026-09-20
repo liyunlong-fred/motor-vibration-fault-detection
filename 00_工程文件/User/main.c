@@ -20,6 +20,17 @@ int main(void)
     delay_init(168);
     usart_init(APP_UART_BAUD);
 
+#if !APP_USE_FAKE_ACCEL                    /* 真传感器才需要 */
+    iic_init();
+    if (mpu6050_init() != 0)               /* mpu6050_init 返回 0 表示成功 */
+    {
+        APP_LOG("MPU6050 初始化失败!\r\n");
+        while (1);                         /* 停在这里, 不要继续跑 */
+    }
+#endif
+
+    app_sample_init();
+
     app_sample_init();                          /* 起 1kHz 心跳 */
 
     APP_LOG("fs=%u Hz, N=%u, 数据源=%s\r\n", APP_FS_HZ, APP_FRAME_N,
