@@ -70,6 +70,7 @@ def main():
     n       = int(meta.get("per_frame", frames.MAX_N))      # 样本数
     afs_code = int(meta.get("afs_code", 0))                 # 量程码
     axis    = meta.get("axis", "?")                         # 轴号
+    tag     = meta.get("tag", "?")                          # 工况标签(recv.py 写进文件头的 tag= 键); 老文件没这个键就显示 ?
 
     raw = np.loadtxt(csv_path, comments="#", dtype=np.int16)
     if raw.size < n:
@@ -100,6 +101,7 @@ def main():
 
     # 打印信息
     print("文件      : %s" % csv_path)
+    print("工况      : %s" % tag)
     print("轴号      : %s" % axis)
     print("采样率    : %d Hz   每帧 %d 点   频率分辨率 %.3f Hz/格" % (fs, n, fs / n))
     print("量程码    : %d  (%s, 灵敏度 %.0f 格/g)"
@@ -125,7 +127,7 @@ def main():
     ax[1].set_title("single-sided amplitude spectrum (N=%d, Hann)" % n)
     ax[1].set_xlabel("frequency (Hz)")
     ax[1].set_ylabel("amplitude (g)")
-    ax[1].set_xlim(0, 200)
+    ax[1].set_xlim(0, 500)
     ax[1].grid(True)
 
     plt.tight_layout()

@@ -7,15 +7,17 @@ import os
 import sys
 import serial           # 串口所使用的库
 import numpy as np
+import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_common"))   # 取得 frames.py 的路径，并将其插到搜索列表的最前面
 import frames   # 导入 frames.py
 
 # ------------------------- 配置 -------------------------
-PORT        = "COM13"       # 板子所在的串口
-BAUD        = 460800        # 波特率，必须与固件 APP_UART_BAUD 一致
-SAVE_FRAMES = 20            # 收满多少帧后存盘
-AXIS_EXPECT = "X"           # 期望测试 X 轴，固件 link_frame_send(w, 'X')
+PORT        = "COM13"        # 板子所在的串口
+BAUD        = 460800         # 波特率，必须与固件 APP_UART_BAUD 一致
+SAVE_FRAMES = 20             # 收满多少帧后存盘
+AXIS_EXPECT = "Z"            # 期望测试 X 轴，固件 link_frame_send(w, '?')
+TAG         = "fan9v_normal" # 本次采集工况: 风扇+电压+状态, 例如 fan9v_normal / fan6v_unbalance
 
 PROJ    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 取得项目根目录
 RAW_DIR = os.path.join(PROJ, "04_数据集", "raw")                         # 定义原始数据的存储路径
@@ -113,11 +115,12 @@ def main():
 
     all_data  = np.concatenate(datas)           # 将 datas 首尾相接，拼成一个长数组
     first_seq = seq_last - len(datas) + 1       # 计算首帧序号
-    path      = os.path.join(RAW_DIR, "%s_%04d_%04d.csv" % (axis, first_seq, seq_last))
+    stamp     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    path      = os.path.join(RAW_DIR, "%s_%s_%s_f%04d-%04d.csv" % (stamp, TAG, axis, first_seq, seq_last))
 
     with open(path, "w", encoding="utf-8") as fp:
-        fp.write("# axis=%s fs=%d afs_code=%d per_frame=%d frames=%d first_seq=%d last_seq=%d\n"
-                 % (axis, frames.FS_HZ, afs_code, datas[0].size, len(datas), first_seq, seq_last))  # 写入数据注释
+        fp.write("# tag=%s axis=%s fs=%d afs_code=%d per_frame=%d frames=%d first_seq=%d last_seq=%d\n"
+                 % (TAG, axis, frames.FS_HZ, afs_code, datas[0].size, len(datas), first_seq, seq_last))        
         np.savetxt(fp, all_data, fmt="%d")      # 存入指定文件，按整数格式
 
     print("-" * 56)

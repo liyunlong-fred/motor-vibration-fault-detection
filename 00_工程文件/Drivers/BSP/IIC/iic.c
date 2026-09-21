@@ -34,6 +34,8 @@ void iic_init(void)
         //数据线配置
     gpio_init_struct_SDA.Pin = IIC_SDA_GPIO_PIN;
     gpio_init_struct_SDA.Mode = GPIO_MODE_OUTPUT_OD;        /* 开漏输出 */
+    gpio_init_struct_SDA.Pull = GPIO_PULLUP;                /* 上拉 */
+    gpio_init_struct_SDA.Speed = GPIO_SPEED_FREQ_VERY_HIGH; /* 快速 */
     //——————————————————————————————
     
     //配置完成后，启用初始化函数

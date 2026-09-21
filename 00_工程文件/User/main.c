@@ -29,8 +29,6 @@ int main(void)
     }
 #endif
 
-    app_sample_init();
-
     app_sample_init();                          /* 起 1kHz 心跳 */
 
     APP_LOG("fs=%u Hz, N=%u, 数据源=%s\r\n", APP_FS_HZ, APP_FRAME_N,
@@ -38,6 +36,7 @@ int main(void)
 
     while (1)
     {
+        
         app_sample_task();                      /* 到点采一个样本 */
 
         if (HAL_GetTick() - last >= 1000)       /* 每秒自检一次实际采样率 */
@@ -54,11 +53,24 @@ int main(void)
             const sample_window_t *w = app_sample_window_get();
 
             app_sample_pause(1);                /* 发帧期间暂停采样 */
-            link_frame_send(w, 'X');
+            link_frame_send(w, 'Z');
             app_sample_pause(0);
 
             app_sample_window_release();
         }
+
+        // mpu6050_raw_t a, b, c;
+        // uint8_t pm1 = 0, id = 0;
+
+        // mpu6050_read_raw(&a);
+        // mpu6050_read_raw(&b);
+        // mpu6050_read_raw(&c);                                   /* 同一位置连读三次, 结果应几乎相同 */
+        // iic_reg_read_length(MPU6050_ADDR, MPU6050_PWR_MGMT_1, &pm1, 1);
+        // id = mpu6050_who_am_i();
+
+        // printf("%6d %6d %6d | %6d %6d %6d | %6d %6d %6d | PWR=0x%02X ID=0x%02X\r\n",
+        //    a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, pm1, id);
+        // delay_ms(50);
     }
 }
 
