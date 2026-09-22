@@ -3,6 +3,7 @@
 
 #include "stdio.h"          /* APP_LOG 用到的 printf 在这里声明 */
 #include "stdint.h"
+#include "app_debug.h"     /* app_log 的声明 */
 
 /* ================= 1、采样与窗 ================= */
 #define APP_FS_HZ           1000U       /* 采样率: 1kHz */
@@ -37,10 +38,9 @@
 
 #define APP_DEBUG           1
 #if APP_DEBUG
-#define APP_LOG(...)        printf(__VA_ARGS__)
+#define APP_LOG(...)        app_log(__VA_ARGS__)
 #else
 #define APP_LOG(...)        ((void)0)
 #endif
 
 #endif
-

@@ -10,15 +10,19 @@
 #include "./app_config.h"
 #include "./app_sample.h"
 #include "link_frame.h"
+#include "dsp_fft.h"
 
 int main(void)
 {
-    uint32_t last = 0, prev = 0;
+    uint32_t last = 0;
 
     HAL_Init();
     sys_stm32_clock_init(336, 8, 2, 7);
     delay_init(168);
     usart_init(APP_UART_BAUD);
+    app_sample_init();                      /* 起 1kHz 心跳 */
+    dsp_fft_init();                         /* 算 Hann 窗表 + 初始化 1024 点 FFT 实例, 只调一次 */
+    //dsp_fft_selftest();                     /* 板上造 45Hz/50mg + 90Hz/10mg, 对完答案就把这一行删掉 */
 
 #if !APP_USE_FAKE_ACCEL                    /* 真传感器才需要 */
     iic_init();
@@ -29,7 +33,7 @@ int main(void)
     }
 #endif
 
-    app_sample_init();                          /* 起 1kHz 心跳 */
+    
 
     APP_LOG("fs=%u Hz, N=%u, 数据源=%s\r\n", APP_FS_HZ, APP_FRAME_N,
             APP_USE_FAKE_ACCEL ? "合成信号(桩)" : "MPU6050");
@@ -39,38 +43,19 @@ int main(void)
         
         app_sample_task();                      /* 到点采一个样本 */
 
-        if (HAL_GetTick() - last >= 1000)       /* 每秒自检一次实际采样率 */
-        {
-            uint32_t now = app_sample_count();
-            last += 1000;
-            APP_LOG("1s 采到 %lu 点, 丢窗 %u\r\n",
-                    (unsigned long)(now - prev), app_sample_overrun());
-            prev = now;
-        }
-
-        if (app_sample_window_ready())          /* 攒满一窗就发出去 */
+        if (app_sample_window_ready())          /* 攒满一窗 */
         {
             const sample_window_t *w = app_sample_window_get();
+            dsp_fft_result_t fft_res;
 
-            app_sample_pause(1);                /* 发帧期间暂停采样 */
-            link_frame_send(w, 'Z');
+            app_sample_pause(1);                /* 处理期间暂停采样, 保证窗内样本等间隔 */
+            dsp_fft_run(w, 'X', &fft_res);      /* 先算 FFT(几百微秒) */
+            dsp_fft_print(&fft_res);            /* 再打印(每窗 6 行, 几毫秒) */
+            link_frame_send(w, 'X');            /* 原来的发帧照旧, 供 PC 对拍 */
             app_sample_pause(0);
 
             app_sample_window_release();
-        }
-
-        // mpu6050_raw_t a, b, c;
-        // uint8_t pm1 = 0, id = 0;
-
-        // mpu6050_read_raw(&a);
-        // mpu6050_read_raw(&b);
-        // mpu6050_read_raw(&c);                                   /* 同一位置连读三次, 结果应几乎相同 */
-        // iic_reg_read_length(MPU6050_ADDR, MPU6050_PWR_MGMT_1, &pm1, 1);
-        // id = mpu6050_who_am_i();
-
-        // printf("%6d %6d %6d | %6d %6d %6d | %6d %6d %6d | PWR=0x%02X ID=0x%02X\r\n",
-        //    a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, pm1, id);
-        // delay_ms(50);
+        }    
     }
 }
 

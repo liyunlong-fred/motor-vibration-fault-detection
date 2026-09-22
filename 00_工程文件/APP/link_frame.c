@@ -43,7 +43,7 @@ uint16_t link_frame_pack(const sample_window_t *w, uint8_t axis, uint8_t *out)
 
     /* ---- 帧头 ---- */
     out[idx++] = (uint8_t)(LINK_FRAME_HEAD >> 8);       /* 0x5A */
-    out[idx++] = (uint8_t)(LINK_FRAME_HEAD >> 8);       /* 0x5A */
+    out[idx++] = (uint8_t)(LINK_FRAME_HEAD & 0xFF);       /* 0x5A */
 
     /* ---- 类型 + 轴号 ---- */
     out[idx++] = LINK_FRAME_TYPE_ACCEL;
@@ -88,3 +88,45 @@ uint8_t link_frame_send(const sample_window_t *w, uint8_t axis)
     return 0;
 }
 
+static uint16_t g_text_seq = 0;     /* 日志自己的序号, 与窗序号分开, PC 端可用它统计日志丢帧 */
+
+uint16_t link_text_pack(const char *s, uint8_t *out)
+{
+    uint16_t i, n = 0, len;
+
+    if ((s == 0) || (out == 0)) { return 0; }
+
+    while ((s[n] != '\0') && (n < LINK_TEXT_MAX)) { n++; }   /* 量长度, 超过上限就截断 */
+
+    if (n == 0) { return 0; }                                /* 空字符串不发 */
+
+    out[0] = (uint8_t)(LINK_FRAME_HEAD >> 8);                /* 0x5A */
+    out[1] = (uint8_t)(LINK_FRAME_HEAD & 0xFF);              /* 0x5A */
+    out[2] = LINK_FRAME_TYPE_TEXT;
+    out[3] = 0;                                              /* 文本帧不用轴号 */
+    out[4] = (uint8_t)(g_text_seq & 0xFF);                   /* 日志序号, 小端 */
+    out[5] = (uint8_t)(g_text_seq >> 8);
+    out[6] = (uint8_t)(n & 0xFF);                            /* 文本字节数, 小端 */
+    out[7] = (uint8_t)(n >> 8);
+    out[8] = 0;                                              /* 文本帧不用量程码 */
+
+    for (i = 0; i < n; i++)
+    {
+        out[9 + i] = (uint8_t)s[i];
+    }
+
+    len = (uint16_t)(LINK_FRAME_OVERHEAD + n);
+    g_text_seq++;
+    return len;
+}
+
+uint8_t link_text_send(const char *s)
+{
+    static uint8_t buf[LINK_FRAME_OVERHEAD + LINK_TEXT_MAX];  /* static: 不用占栈 */
+    uint16_t len = link_text_pack(s, buf);
+
+    if (len == 0) { return 1; }
+
+    if (HAL_UART_Transmit(&g_uart1_handle, buf, len, 1000) != HAL_OK) { return 1; }
+    return 0;
+}

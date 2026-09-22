@@ -24,6 +24,10 @@ AXIS_OK    = (ord("X"), ord("Y"), ord("Z"))                     # ord：把单�
 SENS       = {0: 16384.0, 1: 8192.0, 2: 4096.0, 3: 2048.0}      # 量程码 -> 灵敏度(格/g)        # 字典：{键：值}
 AFS_NAME   = {0: "+/-2g", 1: "+/-4g", 2: "+/-8g", 3: "+/-16g"}  # 量程码 -> 量程名称
 
+TYPE_TEXT  = 2                # 新增: 文本日志行
+TEXT_MAX   = 96               # 必须与固件 LINK_TEXT_MAX 一致
+AXIS_TEXT  = "T"              # 文本帧在 Python 侧统一贴这个轴号
+
 def find_head(buf, start=0):
     """在字节流里找帧头（从头开始）, 返回下标; 没找到返回 -1"""
     return buf.find(HEAD, start)
@@ -46,22 +50,35 @@ def parse_frame(buf, pos=0):
     cnt      = buf[pos + 6] | (buf[pos + 7] << 8)
     afs_code = buf[pos + 8]
 
-    if (ftype != TYPE_ACCEL) or (axis not in AXIS_OK) or \
-       (cnt < 1) or (cnt > MAX_N) or (afs_code not in SENS):
-        return ("bad", None, 0)                         # 帧头任意一处不符合传输协议
+    if ftype == TYPE_ACCEL:                             # 类型 1: 加速度样本块
+        if (axis not in AXIS_OK) or (cnt < 1) or (cnt > MAX_N) or (afs_code not in SENS):
+            return ("bad", None, 0)
+        payload = 2 * cnt                               # 每样本 2 字节
+    elif ftype == TYPE_TEXT:                            # 类型 2: 文本日志行
+        if (cnt < 1) or (cnt > TEXT_MAX):
+            return ("bad", None, 0)
+        payload = cnt                                   # 文本是 1 字节 1 个字符
+    else:                                               # 类型不认识: 当假帧头处理
+        return ("bad", None, 0)
 
-    total = OVERHEAD + 2 * cnt                          # 计算帧长
+    total = OVERHEAD + payload                          # 计算帧长
+
     if len(buf) - pos < total:
         return ("more", None, 0)                        # 剩余字节不够一整帧
 
     # buf[]——对buf的数据部分切片，bytes()——转化成只读的字节
     # xx.frombuffer(xxx, dtype="xxx")——按指定格式解释成数组，"<i2"——小端、有符号整数、两字节
     # 将buf的 “数据部分” 按 “小端、有符号整数、两字节” 解释成数组，存入 data
-    data = np.frombuffer(bytes(buf[pos + OVERHEAD: pos + total]), dtype="<i2")
-    
-    # 字典 = {"键": 值}
-    frame = {"axis": chr(axis), "seq": seq, "n": cnt,
-             "afs_code": afs_code, "data": data, "length": total}
+    body = bytes(buf[pos + OVERHEAD: pos + total])
+
+    if ftype == TYPE_ACCEL:
+        frame = {"type": ftype, "axis": chr(axis), "seq": seq, "n": cnt,
+                 "afs_code": afs_code, "data": np.frombuffer(body, dtype="<i2"),
+                 "length": total}
+    else:
+        frame = {"type": ftype, "axis": AXIS_TEXT, "seq": seq, "n": cnt,
+                 "afs_code": 0, "text": body.decode("gbk", "replace"),
+                 "length": total}
 
     return ("ok", frame, total)                         # 返回将帧按协议切分好的字典
 

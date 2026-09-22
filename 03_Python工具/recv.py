@@ -16,7 +16,7 @@ import frames   # 导入 frames.py
 PORT        = "COM13"        # 板子所在的串口
 BAUD        = 460800         # 波特率，必须与固件 APP_UART_BAUD 一致
 SAVE_FRAMES = 20             # 收满多少帧后存盘
-AXIS_EXPECT = "Z"            # 期望测试 X 轴，固件 link_frame_send(w, '?')
+AXIS_EXPECT = "X"            # 期望测试 X 轴，固件 link_frame_send(w, '?')
 TAG         = "fan9v_normal" # 本次采集工况: 风扇+电压+状态, 例如 fan9v_normal / fan6v_unbalance
 
 PROJ    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 取得项目根目录
@@ -51,6 +51,11 @@ def main():
     seq_last = 0                # 上一帧的序号，用于检测丢帧
     lost     = 0                # 累计丢帧数
 
+    stamp    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(PROJ, "06_笔记与踩坑", "%s_boardlog.txt" % stamp)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    log_fp   = open(log_path, "w", encoding="utf-8")
+
     try:
         
         while len(datas) < SAVE_FRAMES:             # 不断读串口数据，直到收取帧数大于指定的存盘帧数
@@ -82,6 +87,13 @@ def main():
                 # ============================================
 
 
+                if f["type"] == frames.TYPE_TEXT:       # 板上日志: 打印 + 落盘, 不当数据
+                    line = f["text"].rstrip("\r\n")
+                    print(line)
+                    log_fp.write(line + "\n")
+                    log_fp.flush()
+                    continue                            # ★ 必须 continue: 否则日志的序号会被当成窗序号
+
                 # =====处理帧：查询丢帧数、记录数据、打印进度=====
                 if seq_last and f["seq"] != seq_last + 1:       # 判定是否丢帧：上一帧序号不为 0 且本帧不等于上一帧序号加 1
                     miss = f["seq"] - seq_last - 1              # 计算丢帧数
@@ -104,6 +116,9 @@ def main():
         if ser.is_open:         # 判断串口是否是打开状态
             ser.close()         # 关闭串口
             print("串口已关闭")
+        
+        log_fp.close()
+        print("日志已保存: %s" % log_path)            
 
     if not datas:
         print("没有收到任何帧, 不保存")
@@ -115,7 +130,6 @@ def main():
 
     all_data  = np.concatenate(datas)           # 将 datas 首尾相接，拼成一个长数组
     first_seq = seq_last - len(datas) + 1       # 计算首帧序号
-    stamp     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     path      = os.path.join(RAW_DIR, "%s_%s_%s_f%04d-%04d.csv" % (stamp, TAG, axis, first_seq, seq_last))
 
     with open(path, "w", encoding="utf-8") as fp:
