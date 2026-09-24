@@ -1,146 +1,215 @@
 # 03_Python工具\recv.py
+"""从串口接收固件数据帧，并按统一标签契约落盘。
+
+旧版 ``04_数据集/raw`` 文件保持兼容但不再写入；正式数据写入
+``04_数据集/formal``，调试数据写入 ``04_数据集/debug_raw``。
 """
-功能: 从串口接收固件发来的数据帧, 存成 CSV 到 04_数据集\raw\
-用法: python recv.py     (运行前必须先关闭串口助手, 串口是独占资源)
-"""
+
+import argparse
+import datetime
 import os
 import sys
-import serial           # 串口所使用的库
+
 import numpy as np
-import datetime
+import serial
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_common"))   # 取得 frames.py 的路径，并将其插到搜索列表的最前面
-import frames   # 导入 frames.py
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "py_common"))
+import frames
+import metadata
 
-# ------------------------- 配置 -------------------------
-PORT        = "COM13"        # 板子所在的串口
-BAUD        = 460800         # 波特率，必须与固件 APP_UART_BAUD 一致
-SAVE_FRAMES = 20             # 收满多少帧后存盘
-AXIS_EXPECT = "X"            # 期望测试 X 轴，固件 link_frame_send(w, '?')
-TAG         = "fan9v_normal" # 本次采集工况: 风扇+电压+状态, 例如 fan9v_normal / fan6v_unbalance
+PROJ = os.path.dirname(_HERE)
+DEFAULT_PORT = "COM13"
+DEFAULT_BAUD = 460800
+DEFAULT_FRAMES = 20
+AXIS_EXPECT = metadata.MEASUREMENT_AXIS
+FORMAL_DIR = os.path.join(PROJ, "04_数据集", "formal")
+DEBUG_DIR = os.path.join(PROJ, "04_数据集", "debug_raw")
+MANIFEST = os.path.join(PROJ, "04_数据集", "manifest.csv")
+LOG_DIR = os.path.join(PROJ, "06_笔记与踩坑", "raw_logs")
 
-PROJ    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 取得项目根目录
-RAW_DIR = os.path.join(PROJ, "04_数据集", "raw")                         # 定义原始数据的存储路径
 
-def main():
-    if not os.path.isdir(RAW_DIR):  # 原始数据的目录如果不存在就创一个新的
-        os.makedirs(RAW_DIR)
+def build_parser():
+    p = argparse.ArgumentParser(description="接收 MPU6050 X 轴振动帧并保存带标签 CSV")
+    p.add_argument("--port", default=DEFAULT_PORT)
+    p.add_argument("--baud", type=int, default=DEFAULT_BAUD)
+    p.add_argument("--frames", type=int, default=DEFAULT_FRAMES)
+    p.add_argument("--data-role", choices=metadata.DATA_ROLES, required=True,
+                   help="formal=正式数据，debug=调试数据")
+    p.add_argument("--source-type", choices=metadata.SOURCE_TYPES, default="real")
+    p.add_argument("--device-id", required=True, help="风扇/被测设备稳定编号，如 fanA")
+    p.add_argument("--device-type", default="fan")
+    p.add_argument("--session-id")
+    p.add_argument("--run-index", type=int, default=1)
+    p.add_argument("--record-id")
+    p.add_argument("--acquired-at")
+    p.add_argument("--observed-condition", choices=metadata.OBSERVED_CONDITIONS,
+                   required=True, help="baseline/added_mass/mount_looseness/unknown")
+    p.add_argument("--target-label", choices=metadata.TARGET_LABELS,
+                   help="默认按 observed-condition 推导，不建议手工覆盖")
+    p.add_argument("--label-basis", choices=metadata.LABEL_BASES, default="unknown")
+    p.add_argument("--label-confidence", choices=metadata.LABEL_CONFIDENCE, default="unknown")
+    p.add_argument("--fault-level", type=int, default=0)
+    p.add_argument("--fault-method", default="")
+    p.add_argument("--tape-spec-id", default="")
+    p.add_argument("--tape-count", type=int, default=0)
+    p.add_argument("--tape-mass-mg", type=float)
+    p.add_argument("--tape-radius-mm", type=float)
+    p.add_argument("--tape-angle-deg", type=float)
+    p.add_argument("--loose-fastener-id", default="",
+                   help="松动的安装紧固点编号，如 M1")
+    p.add_argument("--loosen-turns", type=float,
+                   help="从基准紧固位置回退的圈数")
+    p.add_argument("--mount-gap-mm", type=float,
+                   help="安装点可复现间隙，毫米；与回退圈数至少填一项")
+    p.add_argument("--voltage-set-v", type=float, required=True)
+    p.add_argument("--voltage-measured-v", type=float)
+    p.add_argument("--rpm-measured", type=float)
+    p.add_argument("--firmware-commit", default="")
+    p.add_argument("--notes", default="")
+    return p
 
+
+def _capture_meta(args):
+    meta = metadata.build_capture_meta(args)
+    meta["device_type"] = args.device_type
+    errors = metadata.validate(meta)
+    if errors:
+        raise metadata.MetadataError("；".join(errors))
+    return meta
+
+
+def _open_serial(args):
     try:
-        ser = serial.Serial(PORT, BAUD, timeout=1)  # 创建串口对象并打开，传入端口和波特率，超时返回（秒）
-    except serial.SerialException as e:
-        # 打印异常状态信息
-        print("打开串口失败: %s" % e)
-        print("排查: 1) 板子插好没  2) 串口助手是否还占着 %s  3) 端口号对不对" % PORT)
-        return
-
-    # 探索者板载 CH340 的“一键下载”电路: RTS->NRST, DTR->BOOT0。
-    # 线状态若停在 DTR=0 / RTS=1, MCU 会被一直按在复位上, 一个字节都发不出来;
-    # 而 pyserial 打开端口时不会主动驱动这两条线, 会沿用驱动里已有的状态,
-    # 所以这里必须显式置 0（实测: DTR=0/RTS=1 收 0 字节, 其余三种组合都能收）。
+        ser = serial.Serial(args.port, args.baud, timeout=1)
+    except serial.SerialException as exc:
+        print("打开串口失败: %s" % exc)
+        print("排查: 板子、串口助手占用、端口号是否正确 (%s)" % args.port)
+        return None
     ser.dtr = False
     ser.rts = False
+    ser.reset_input_buffer()
+    return ser
 
-    ser.reset_input_buffer()    # 清空串口接收缓冲区
-    print("已打开 %s @ %d, 目标 %d 帧, 按 Ctrl+C 可提前结束" % (PORT, BAUD, SAVE_FRAMES))
 
-    buf      = bytearray()      # 接受缓冲，累积的原始字节流
-    datas    = []               # 每帧的 int16 数组，收到一帧就追加一个数组
-    axis     = None             # 轴号
-    afs_code = 0                # 量程码
-    seq_last = 0                # 上一帧的序号，用于检测丢帧
-    lost     = 0                # 累计丢帧数
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.frames < 1:
+        print("--frames 必须大于 0")
+        return 2
+    try:
+        meta = _capture_meta(args)
+    except metadata.MetadataError as exc:
+        print("标签校验失败: %s" % exc)
+        return 2
 
-    stamp    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join(PROJ, "06_笔记与踩坑", "%s_boardlog.txt" % stamp)
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    log_fp   = open(log_path, "w", encoding="utf-8")
+    ser = _open_serial(args)
+    if ser is None:
+        return 1
+    print("已打开 %s @ %d, 目标 %d 帧，按 Ctrl+C 可提前结束" %
+          (args.port, args.baud, args.frames))
+
+    buf = bytearray()
+    datas = []
+    axis = None
+    afs_code = 0
+    seq_first = None
+    seq_last = 0
+    lost = 0
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log_path = os.path.join(LOG_DIR, "%s_boardlog.txt" % stamp)
+    log_fp = open(log_path, "w", encoding="utf-8")
 
     try:
-        
-        while len(datas) < SAVE_FRAMES:             # 不断读串口数据，直到收取帧数大于指定的存盘帧数
-            chunk = ser.read(ser.in_waiting or 1)   # 读取串口缓冲区全部字节, 缓冲区为空就阻塞等待 1 字节
+        while len(datas) < args.frames:
+            chunk = ser.read(ser.in_waiting or 1)
             if chunk:
-                buf += chunk                        # 将数据存到接收缓冲区
-
+                buf += chunk
             while True:
-                pos = frames.find_head(buf)         # 调用 frames.py 中找帧头的函数
-                # ========删掉除完整帧以外的所有无用数据=========
-                if pos < 0:                         # 如果缓冲区没有帧头
-                    if len(buf) > 1:                # 如果缓冲区有数据
-                        del buf[:len(buf) - 1]      # 删掉数据，只留最后 1 字节(可能是半个帧头)
+                pos = frames.find_head(buf)
+                if pos < 0:
+                    if len(buf) > 1:
+                        del buf[:len(buf) - 1]
                     break
                 if pos > 0:
-                    del buf[:pos]                   # 丢掉帧头之前的杂散字节
-                # ============================================
-
-
-                # ====解析帧：处理解析时的异常状态，成功则继续====
-                status, f, used = frames.parse_frame(buf) # 将 “解析状态”、“帧字典”、“总帧长” 返回存入变量
+                    del buf[:pos]
+                status, frame, used = frames.parse_frame(buf)
                 if status == "more":
-                    break                           # 还不够一帧, 等下次 read
+                    break
                 if status == "bad":
-                    del buf[0]                      # 假帧头, 跳过它继续找
+                    del buf[0]
                     continue
-
-                del buf[:used]                      # 解析成功，取走并将其在缓冲区删除
-                # ============================================
-
-
-                if f["type"] == frames.TYPE_TEXT:       # 板上日志: 打印 + 落盘, 不当数据
-                    line = f["text"].rstrip("\r\n")
+                del buf[:used]
+                if frame["type"] == frames.TYPE_TEXT:
+                    line = frame["text"].rstrip("\r\n")
                     print(line)
                     log_fp.write(line + "\n")
                     log_fp.flush()
-                    continue                            # ★ 必须 continue: 否则日志的序号会被当成窗序号
-
-                # =====处理帧：查询丢帧数、记录数据、打印进度=====
-                if seq_last and f["seq"] != seq_last + 1:       # 判定是否丢帧：上一帧序号不为 0 且本帧不等于上一帧序号加 1
-                    miss = f["seq"] - seq_last - 1              # 计算丢帧数
-                    lost += miss
-                    print("  !! 丢帧: 期望帧序号 seq=%d, 实收帧序号 %d (丢 %d 帧)"
-                          % (seq_last + 1, f["seq"], miss))     # 打印丢帧信息
-                
-                seq_last = f["seq"]                             # 记录数据
-                axis     = f["axis"]
-                afs_code  = f["afs_code"]
-
-                datas.append(f["data"])                         # 存储帧
-                
-                print("  接收进度 [%2d/%2d] 轴号 axis=%s 帧序号 seq=%d 此帧样本数 n=%d 量程码 afs_code=%d"
-                      % (len(datas), SAVE_FRAMES, f["axis"], f["seq"], f["n"], f["afs_code"]))  # 打印进度和接收信息
-                # ============================================
+                    continue
+                if seq_last and frame["seq"] != seq_last + 1:
+                    miss = frame["seq"] - seq_last - 1
+                    lost += max(0, miss)
+                    print("  !! 丢帧: 期望 %d，实收 %d (丢 %d 帧)" %
+                          (seq_last + 1, frame["seq"], miss))
+                if seq_first is None:
+                    seq_first = frame["seq"]
+                seq_last = frame["seq"]
+                axis = frame["axis"]
+                afs_code = frame["afs_code"]
+                datas.append(frame["data"])
+                print("  接收进度 [%2d/%2d] axis=%s seq=%d n=%d afs=%d" %
+                      (len(datas), args.frames, frame["axis"], frame["seq"],
+                       frame["n"], frame["afs_code"]))
     except KeyboardInterrupt:
         print("\n[手动停止]")
     finally:
-        if ser.is_open:         # 判断串口是否是打开状态
-            ser.close()         # 关闭串口
+        if ser.is_open:
+            ser.close()
             print("串口已关闭")
-        
         log_fp.close()
-        print("日志已保存: %s" % log_path)            
+        print("日志已保存: %s" % log_path)
 
     if not datas:
-        print("没有收到任何帧, 不保存")
-        return
-
+        print("没有收到任何帧，不保存")
+        return 1
     if axis != AXIS_EXPECT:
-        print("注意: 收到的是 %s 轴, 期望 %s 轴 —— 桩信号的振动在 X 轴, 发 Z 轴会全是 0"
-              % (axis, AXIS_EXPECT))
+        print("注意: 收到的是 %s 轴，期望 %s 轴" % (axis, AXIS_EXPECT))
 
-    all_data  = np.concatenate(datas)           # 将 datas 首尾相接，拼成一个长数组
-    first_seq = seq_last - len(datas) + 1       # 计算首帧序号
-    path      = os.path.join(RAW_DIR, "%s_%s_%s_f%04d-%04d.csv" % (stamp, TAG, axis, first_seq, seq_last))
-
+    all_data = np.concatenate(datas)
+    meta.update({
+        "measurement_axis": axis,
+        "fs_hz": frames.FS_HZ,
+        "frame_n": int(datas[0].size),
+        "afs_code": int(afs_code),
+        "frames": len(datas),
+        "first_seq": int(seq_first),
+        "last_seq": int(seq_last),
+        "lost_frames": int(lost),
+        "window_span_ms": 1000.0 * len(datas) * datas[0].size / frames.FS_HZ,
+        "actual_fs_hz": frames.FS_HZ,
+    })
+    errors = metadata.validate(meta, require_capture=False)
+    if errors:
+        print("采集后元数据校验失败，不保存: %s" % "；".join(errors))
+        return 2
+    out_dir = FORMAL_DIR if args.data_role == "formal" else DEBUG_DIR
+    os.makedirs(out_dir, exist_ok=True)
+    filename = metadata.make_filename(meta, axis, seq_first, seq_last)
+    path = os.path.join(out_dir, filename)
     with open(path, "w", encoding="utf-8") as fp:
-        fp.write("# tag=%s axis=%s fs=%d afs_code=%d per_frame=%d frames=%d first_seq=%d last_seq=%d\n"
-                 % (TAG, axis, frames.FS_HZ, afs_code, datas[0].size, len(datas), first_seq, seq_last))        
-        np.savetxt(fp, all_data, fmt="%d")      # 存入指定文件，按整数格式
+        metadata.write_header(fp, meta)
+        np.savetxt(fp, all_data, fmt="%d")
+    if args.data_role == "formal":
+        metadata.append_manifest(MANIFEST, os.path.join("formal", filename), meta)
 
     print("-" * 56)
-    print("共收到 %d 帧, 丢帧 %d" % (len(datas), lost))
+    print("共收到 %d 帧，丢帧 %d" % (len(datas), lost))
     print("已保存: %s  (%d 个样本)" % (path, all_data.size))
+    if args.data_role == "formal":
+        print("已登记: %s" % MANIFEST)
+    return 0
 
-# 可直接当工具运行：被直接运行时执行 main()，被别的文件导入时不会自己执行一遍 main()
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

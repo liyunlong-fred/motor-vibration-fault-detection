@@ -1,0 +1,15 @@
+{
+  "types": {
+    "aliases": "aliases",
+    "as_of": "date",
+    "authority": "text",
+    "cssclasses": "multitext",
+    "domain": "text",
+    "kb_id": "text",
+    "kind": "text",
+    "last_verified": "date",
+    "lifecycle": "text",
+    "source_paths": "multitext",
+    "tags": "tags"
+  }
+}

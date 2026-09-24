@@ -1,0 +1,86 @@
+[
+  {
+    "id": "FW-CONFIG",
+    "name": "固件统一参数",
+    "domain": "firmware",
+    "path": "00_工程文件/APP/app_config.h",
+    "role": "采样率、窗口长度、数据源与串口波特率"
+  },
+  {
+    "id": "FW-SAMPLE",
+    "name": "采样与窗口管理",
+    "domain": "firmware",
+    "path": "00_工程文件/APP/app_sample.c",
+    "role": "TIM3 心跳、MPU6050 采样与双缓冲"
+  },
+  {
+    "id": "FW-FFT",
+    "name": "板上 FFT",
+    "domain": "dsp",
+    "path": "00_工程文件/APP/dsp_fft.c",
+    "role": "去均值、Hann、RFFT、单边幅值和 TOP-5"
+  },
+  {
+    "id": "FW-LINK",
+    "name": "上行帧协议",
+    "domain": "firmware",
+    "path": "00_工程文件/APP/link_frame.h",
+    "role": "数据帧与日志帧协议定义"
+  },
+  {
+    "id": "FW-MAIN",
+    "name": "固件入口",
+    "domain": "firmware",
+    "path": "00_工程文件/User/main.c",
+    "role": "外设初始化与主循环调度"
+  },
+  {
+    "id": "HW-IIC",
+    "name": "软件 IIC 引脚定义",
+    "domain": "hardware",
+    "path": "00_工程文件/Drivers/BSP/IIC/iic.h",
+    "role": "PB6/PB7 接线和 GPIO 宏"
+  },
+  {
+    "id": "HW-MPU6050",
+    "name": "MPU6050 配置",
+    "domain": "hardware",
+    "path": "00_工程文件/Drivers/BSP/MPU6050/mpu6050.h",
+    "role": "量程、寄存器和灵敏度定义"
+  },
+  {
+    "id": "PC-RECV",
+    "name": "串口采集入口",
+    "domain": "tooling",
+    "path": "03_Python工具/recv.py",
+    "role": "接收、分帧、元数据采集与落盘"
+  },
+  {
+    "id": "PC-FRAMES",
+    "name": "PC 帧解析",
+    "domain": "tooling",
+    "path": "03_Python工具/py_common/frames.py",
+    "role": "与固件帧协议对拍"
+  },
+  {
+    "id": "PC-METADATA",
+    "name": "数据元数据契约",
+    "domain": "data",
+    "path": "03_Python工具/py_common/metadata.py",
+    "role": "schema v3 校验、机械松动量化字段、CSV 头和 manifest"
+  },
+  {
+    "id": "PC-CONFIG",
+    "name": "标签与路径配置",
+    "domain": "data",
+    "path": "03_Python工具/config.json",
+    "role": "受控枚举、轴向与数据目录"
+  },
+  {
+    "id": "PC-DATASET",
+    "name": "训练清单生成",
+    "domain": "data",
+    "path": "03_Python工具/make_dataset.py",
+    "role": "筛选通过质检的正式样本"
+  }
+]

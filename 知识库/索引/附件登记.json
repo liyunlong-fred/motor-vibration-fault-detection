@@ -1,0 +1,42 @@
+[
+  {
+    "id": "REF-MPU6050-REGISTERS",
+    "name": "MPU6050 寄存器选用表",
+    "domain": "hardware",
+    "path": "01_文档/外设信息/MPU6050寄存器选用表_电机振动检测.xlsx",
+    "role": "项目使用寄存器、位域和配置值速查",
+    "distribution": "project"
+  },
+  {
+    "id": "REF-MPU6000-REGISTER-MAP",
+    "name": "MPU-6000/6050 Register Map",
+    "domain": "hardware",
+    "path": "01_文档/外设信息/GY521mpu-6050资料/RM-MPU-6000A.pdf",
+    "role": "本地芯片寄存器参考资料",
+    "distribution": "local-reference"
+  },
+  {
+    "id": "REF-MPU6000-DATASHEET",
+    "name": "MPU-6000/6050 Product Specification",
+    "domain": "hardware",
+    "path": "01_文档/外设信息/GY521mpu-6050资料/PS-MPU-6000A.pdf",
+    "role": "本地芯片电气与性能参考资料",
+    "distribution": "local-reference"
+  },
+  {
+    "id": "EVIDENCE-NORMAL-SPECTRUM",
+    "name": "9 V 正常样本频谱",
+    "domain": "dsp",
+    "path": "05_演示与输出/20260922_175513_fan9v_normal_X_f0001-0020_spectrum.png",
+    "role": "正常状态频谱里程碑图",
+    "distribution": "project"
+  },
+  {
+    "id": "EVIDENCE-UNBALANCE-SPECTRUM",
+    "name": "9 V 加质量样本频谱",
+    "domain": "dsp",
+    "path": "05_演示与输出/20260922_175755_fan9v_unbalance_X_f0001-0020_spectrum.png",
+    "role": "2× 分量增强的频谱证据",
+    "distribution": "project"
+  }
+]

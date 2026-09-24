@@ -5,7 +5,9 @@
 *.c    text
 *.h    text
 *.py   text
-*.md   text
+*.md   text eol=lf
+*.json text eol=lf
+*.base text eol=lf
 *.txt  text
 
 # Keil 工程文件：不要动它的行尾（内部多为 GBK 中文注释，转换会制造"整文件都改了"的假 diff）

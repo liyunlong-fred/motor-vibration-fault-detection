@@ -14,6 +14,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # 让本脚本能 import 同目录的 harmonics.py
 import harmonics
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_common"))
+import metadata
 
 FS = 1000          # 采样率 Hz, 与固件一致
 N = 1024           # 每帧点数, 与固件一致
@@ -127,20 +129,27 @@ def case_5_csv_roundtrip():
     if not os.path.isdir(tmp):
         os.makedirs(tmp)
     try:
-        path = os.path.join(tmp, "20260921_120000_notag_Z_syn45.csv")
+        path = os.path.join(tmp, "20260921_120000_fanA_baseline_9V_X.csv")
         counts = make_counts(45.0, {1: 0.50, 2: 0.10})
         with open(path, "w", encoding="utf-8") as fp:
-            fp.write("# axis=Z fs=%d afs_code=0 per_frame=%d frames=%d first_seq=1 last_seq=%d\n"
-                     % (FS, N, FRAMES, FRAMES))
+            metadata.write_header(fp, {
+                "schema_version": 2, "record_id": "syn45", "data_role": "debug",
+                "source_type": "synthetic", "device_id": "fanA", "session_id": "test",
+                "observed_condition": "baseline", "target_label": "normal",
+                "label_basis": "controlled_injection", "label_confidence": "confirmed",
+                "measurement_axis": "X", "gravity_axis": "Y", "voltage_set_v": 9,
+                "fs_hz": FS, "frame_n": N, "afs_code": 0, "frames": FRAMES,
+                "first_seq": 1, "last_seq": FRAMES, "quality_status": "pass",
+            })
             fp.write("\n".join(str(int(v)) for v in counts))
 
         meta, samples = harmonics.load_csv(path)
-        check("T5.1 读到元数据 fs/per_frame", meta.get("fs") == str(FS) and meta.get("per_frame") == str(N),
+        check("T5.1 读到元数据 fs_hz/frame_n", int(meta.get("fs_hz")) == FS and int(meta.get("frame_n")) == N,
               "meta = %s" % meta)
         check("T5.2 读到的样本数与写出的一致", samples.size == counts.size,
               "%d vs %d" % (samples.size, counts.size))
 
-        f, amp, nf = harmonics.average_spectrum(samples, int(meta["fs"]), int(meta["per_frame"]),
+        f, amp, nf = harmonics.average_spectrum(samples, int(meta["fs_hz"]), int(meta["frame_n"]),
                                                 int(meta["afs_code"]))
         check("T5.3 平均了 20 帧", nf == FRAMES, "nf = %d" % nf)
         r = harmonics.analyze(f, amp)
@@ -148,6 +157,48 @@ def case_5_csv_roundtrip():
               "f0 = %.2f Hz" % (r["f0"] if r["f0"] else -1.0))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)      # 自检不留垃圾
+
+
+def case_6_supply_band_weak_1x():
+    """T6: 供电频段先验 —— 9V 工况下真实 1× 很弱、2× 最强
+    合成 36.62Hz 的 1×(幅值只占最大峰的 2%)与很强的 2×(73.24Hz)。
+    不给频段先验时, 工具会被幅值高的 2× 带偏(把 2× 当 1×);
+    给出 9V 应有频段(12V 铭牌 2300~3500rpm 按 9/12 折算)后, 应改判真正的 1×。"""
+    print("T6  9V 工况: 1×(36.6Hz, 只占 2%) + 2×(73.2Hz, 最强) —— 频段先验救回弱 1×")
+    counts = make_counts(36.62, {1: 0.008, 2: 0.40, 3: 0.02, 4: 0.15, 5: 0.02, 6: 0.08})
+    f, amp, nf = harmonics.average_spectrum(counts, FS, N)
+
+    strict = harmonics.find_peaks(f, amp, 10, 400, 0.08)
+    check("T6.0 弱 1× 在常规阈值下不算峰(所以要靠频段内放宽阈值)",
+          not any(abs(p[0] - 36.6) <= 1.5 for p in strict),
+          "常规阈值峰数 = %d" % len(strict))
+
+    r_off = harmonics.analyze(f, amp)                                   # 关闭频段先验(旧版行为)
+    r_on = harmonics.analyze(f, amp, rpm_range=(2300.0, 3500.0), supply=[9.0])
+    check("T6.1 无频段先验时被强 2× 带偏(演示原问题)",
+          r_off["f0"] is not None and abs(r_off["f0"] - 73.24) <= 2.5,
+          "f0 = %.2f Hz" % (r_off["f0"] if r_off["f0"] else -1.0))
+    check("T6.2 给 9V 频段后改判 1× ≈ 36.6 Hz",
+          r_on["f0"] is not None and abs(r_on["f0"] - 36.62) <= 1.5,
+          "f0 = %.2f Hz" % (r_on["f0"] if r_on["f0"] else -1.0))
+    check("T6.3 改判后 f0 落在 9V 频段内",
+          bool(r_on["f0_band"]), "命中电压 = %s" % r_on["f0_band"])
+    check("T6.4 改判后转速 ≈ 2197 rpm(而不是被带偏时的 4395)",
+          r_on["f0"] is not None and abs(r_on["rpm"] - 36.62 * 60.0) <= 90.0,
+          "%.0f rpm" % (r_on["rpm"] if r_on["rpm"] else -1.0))
+
+
+def case_7_supply_from_name():
+    """T7: --supply auto 从文件名里认供电电压(数据命名约定 ..._fan9v_...)"""
+    print("T7  文件名 → 供电电压识别")
+    check("T7.1 fan9v 认出 9V",
+          harmonics.guess_supply_from_name("20260922_175755_fan9v_unbalance_X.csv") == [9.0], "")
+    check("T7.2 fan6v 认出 6V", harmonics.guess_supply_from_name("a_fan6v_b.csv") == [6.0], "")
+    check("T7.3 fan12v 认出 12V", harmonics.guess_supply_from_name("a_fan12v_b.csv") == [12.0], "")
+    check("T7.4 文件名没有电压信息时返回空(交给 auto 全电压段)",
+          harmonics.guess_supply_from_name("20260921_170215_notag_Z.csv") == [], "")
+    check("T7.5 --supply none 关闭频段先验", harmonics.parse_supply("none", "x_fan9v.csv") == [], "")
+    check("T7.6 --supply 6,9 解析成两个电压", harmonics.parse_supply("6,9") == [6.0, 9.0], "")
 
 
 def main():
@@ -158,6 +209,8 @@ def main():
     case_3_even_only_ambiguity()
     case_4_pure_noise()
     case_5_csv_roundtrip()
+    case_6_supply_band_weak_1x()
+    case_7_supply_from_name()
     print("-" * 64)
 
     bad = [x for x in _results if not x[1]]

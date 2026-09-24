@@ -1,0 +1,48 @@
+filters:
+  and:
+    - file.ext == "md"
+    - kb_id
+properties:
+  file.name:
+    displayName: 文档
+  kind:
+    displayName: 类型
+  domain:
+    displayName: 领域
+  lifecycle:
+    displayName: 生命周期
+  authority:
+    displayName: 权威级别
+  last_verified:
+    displayName: 最后核实
+views:
+  - type: table
+    name: 当前文档
+    filters:
+      and:
+        - lifecycle == "current"
+    order:
+      - file.name
+      - kind
+      - domain
+      - authority
+      - last_verified
+  - type: table
+    name: 历史快照
+    filters:
+      and:
+        - lifecycle == "snapshot"
+    order:
+      - file.name
+      - as_of
+      - authority
+      - last_verified
+  - type: table
+    name: 全部受管文档
+    order:
+      - file.name
+      - kind
+      - domain
+      - lifecycle
+      - authority
+      - last_verified

@@ -49,9 +49,13 @@ JLinkSettings.ini
 # ---------- 4. 重复副本 / 第三方资料包（本机保留，不入库） ----------
 GY521mpu-6050资料/
 
-# ---------- 5. 原始采集数据（整目录不入库） ----------
-#  结档时想放少量样例进仓库，用：git add -f 04_数据集/raw/xxx.csv
+# ---------- 5. 数据集分层 ----------
+# formal 是可审计的正式样本，允许按里程碑入库；raw 是旧版历史调试目录。
 04_数据集/raw/
+04_数据集/debug_raw/
+04_数据集/processed/
+06_笔记与踩坑/raw_logs/
+06_笔记与踩坑/*_boardlog.txt
 
 # ---------- 6. 系统 / 编辑器临时文件 ----------
 Thumbs.db
@@ -67,4 +71,17 @@ desktop.ini
 00_工程文件/**/.vscode/
 
 # ---------- 8. 仅本地保存，不上传云端 ----------
-01_文档/电机振动故障检测_项目规划.md
+/05_演示与输出/debug/
+/06_笔记与踩坑/raw_logs/
+
+# ---------- 9. Obsidian：只提交可复用配置，不提交个人界面状态 ----------
+.obsidian/workspace*.json
+.obsidian/appearance.json
+.obsidian/graph.json
+.obsidian/hotkeys.json
+.obsidian/community-plugins.json
+.obsidian/plugins/
+.obsidian/themes/
+.obsidian/snippets/
+.obsidian/cache/
+.trash/

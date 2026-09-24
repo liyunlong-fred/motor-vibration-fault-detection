@@ -1,4 +1,21 @@
+---
+kb_id: DSP-FFT-D4-RUNBOOK
+kind: procedure
+domain: dsp
+lifecycle: snapshot
+authority: supporting
+last_verified: 2026-09-22
+as_of: 2026-09-22
+source_paths:
+  - 00_工程文件/APP/dsp_fft.c
+  - 00_工程文件/APP/dsp_fft.h
+---
+
 # D4 操作清单：把 FFT 搬到板上（CMSIS-DSP 1024 点实数 FFT + Hann 窗）
+
+> [!note] 文档角色
+> 这是 D4 阶段的操作快照，保留当时步骤和排查语境。当前参数与完成状态请先看
+> [`知识库/10_当前状态.md`](../知识库/10_当前状态.md) 和实际源码。
 
 > 配套代码：`00_工程文件\APP\dsp_fft.h`、`00_工程文件\APP\dsp_fft.c`（已按项目习惯写成 GBK 编码）。
 > 本清单按"一天 4–6 h"排：第 0–3 步约 1 h，第 4 步约 1 h，第 5–6 步约 1.5 h，第 7–9 步约 1 h，剩下是缓冲。
@@ -24,6 +41,7 @@
 ## 第 1 步：把 CMSIS-DSP 加进 Keil 工程
 
 **本机实际情况（我已确认）**
+
 - Keil 装在 `C:\Work\MDK5.43`；
 - CMSIS 包：`C:\Work\MDK5.43\Packs\ARM\CMSIS\5.8.0`，另有 `ARM\CMSIS-DSP\1.16.2`；
 - **两个包都只有源码（`DSP\Source`、`DSP\Include`），没有预编译的 `arm_cortexM4lf_math.lib`**。
@@ -31,16 +49,30 @@
 - 当前工程 `Options for Target → Target`：**ARM Compiler 已是 AC6**、**FPU = Single Precision 已开**、**未勾 Use MicroLIB**、
   Include Paths = `..\..\User;..\..\Drivers;..\..\Drivers\CMSIS\Device\ST\STM32F4xx\Include;..\..\Drivers\CMSIS\Include;..\..\Drivers\ST\STM32F4xx_HAL_Driver\Inc;..\..\Middlewares;..\..\APP`。
 
+### 你现在这个错误（找不到 `arm_math.h`）的两种修法
+
+报错形如 `dsp_fft.c(2): error: 'arm_math.h' file not found`（Keil 也可能写 `cannot open source input file "arm_math.h"`），
+含义只有一个：**工程不知道 `arm_math.h` 放在哪**，也就是 DSP 的头文件目录没进 Include Paths。代码本身没问题。
+
+- **修法一（30 秒，先让它能找到头文件）**：`Options for Target` → `C/C++` → `Include Paths` → 末尾追加
+  `C:\Work\MDK5.43\Packs\ARM\CMSIS\5.8.0\CMSIS\DSP\Include` → `OK` → F7。
+  只做这一步的话，编译能过，但**链接会报 `Undefined symbol arm_rfft_fast_f32`**（函数实现还没进工程），
+  所以还要接着做方案 A 或方案 B。
+- **修法二（一步到位）**：直接做下面的方案 A（RTE 勾选，最省事），或方案 B（Include Paths + 手工加 8 个源文件）。
+
 ### 方案 A（首选）：用 RTE 勾选
 
 1. Keil 菜单 `Project` → `Manage` → `Run-Time Environment...`；
 2. 展开 `CMSIS`，勾上 **DSP**（`Core` 一般会被自动带上，让它自动勾）；
 3. 右边 `Resolve` 按钮若变红，点一下让它自动解决依赖；
 4. `OK`。Keil 会把 DSP 源码加进工程的 RTE 分组，并自动补好 include 路径。
+   （我核对过这个包的 `ARM.CMSIS.pdsc`：DSP 组件声明的是 `DSP/Source/*/TransformFunctions.c`、`CommonTables.c` 这类**聚合文件**，
+   它们内部用 `#include` 把各个具体实现拼起来，所以 RTE 这条路在你机器上是可用的。）
 
 **可能会遇到的坑**：RTE 会带进 CMSIS 5.8.0 的 `Core`，而工程自己已经有一份 `Drivers\CMSIS\Include`，
 两份 `core_cm4.h` / `cmsis_compiler.h` 可能撞车（报重复定义或宏未定义）。
 处理顺序：
+
 - ① 先只勾 DSP、取消勾 Core，看编译过不过；
 - ② 还报错就把 `C:\Work\MDK5.43\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include` 手写进 Include Paths（放最后一位），
   让工程原有的 CMSIS 优先被找到。
@@ -49,17 +81,29 @@
 
 1. `Options for Target` → `C/C++` → `Include Paths` 追加两行：
    `C:\Work\MDK5.43\Packs\ARM\CMSIS\5.8.0\CMSIS\DSP\Include`
-2. 右键工程里新建一个组（如 `Middlewares/CMSIS-DSP`），`Add Existing Files to Group` 添加这些源文件（全在
-   `C:\Work\MDK5.43\Packs\ARM\CMSIS\5.8.0\CMSIS\DSP\Source\` 下）：
-   - `TransformFunctions\arm_rfft_fast_f32.c`
-   - `TransformFunctions\arm_rfft_fast_init_f32.c`
-   - `TransformFunctions\arm_cfft_f32.c`
-   - `TransformFunctions\arm_cfft_init_f32.c`
-   - `TransformFunctions\arm_bitreversal_32.c`（或 `arm_bitreversal2.S`）
-   - `ComplexMathFunctions\arm_radix8_butterfly_f32.c`（若报 `undefined arm_radix8_butterfly_f32` 就是缺它）
-   - `CommonTables\arm_common_tables.c`
-   - `CommonTables\arm_const_structs.c`
-3. 链接报 `undefined symbol` 时，把 `Source\TransformFunctions` 与 `Source\CommonTables` 两个目录的文件**整目录加入**，再编译一次。
+
+2. 右键工程里新建一个组（如 `Middlewares/CMSIS-DSP`），`Add Existing Files to Group` 添加**下面这 8 个 .c 文件**
+   （全在 `C:\Work\MDK5.43\Packs\ARM\CMSIS\5.8.0\CMSIS\DSP\Source\` 下）。
+   **这是最小集合，我已用 armclang + armlink 在你这台机器上实测过：这 8 个文件链接 0 error，去掉其中任何一个都会报 L6218E。**
+
+   - `TransformFunctions\arm_rfft_fast_f32.c`（正变换本体）
+   - `TransformFunctions\arm_rfft_fast_init_f32.c`（`arm_rfft_fast_init_f32`）
+   - `TransformFunctions\arm_cfft_f32.c`（复数 FFT 内核）
+   - `TransformFunctions\arm_cfft_init_f32.c`（`arm_cfft_init_f32`）
+   - `TransformFunctions\arm_cfft_radix8_f32.c` → 少了报 `Undefined symbol arm_radix8_butterfly_f32`
+   - `TransformFunctions\arm_bitreversal2.c` → 少了报 `Undefined symbol arm_bitreversal_32`
+   - `CommonTables\arm_common_tables.c` → 少了报 `Undefined symbol twiddleCoefF64_16 …`
+   - `CommonTables\arm_const_structs.c` → 少了报 `Undefined symbol arm_cfft_sR_f32_len1024 …`
+
+   ⚠ 第 6 项**只能加一个**：`arm_bitreversal2.c` 与 `arm_bitreversal2.S` 是同一个函数的两种实现（C 版和汇编版），
+   两个都加会报重复定义；`arm_bitreversal.c` 是给 Cortex-M0 用的，本项目不要加。
+   注意没有 `arm_bitreversal_32.c`、也没有 `arm_radix8_butterfly_f32.c` 这两个文件名（上一版清单写错了，已更正）。
+
+3. 这套表会把 f64 的旋转因子一起带进来：实测 cfft+rfft 全部链接后 .axf 约 133 KB，也就是比现在大 **100 KB 量级**。
+   F407 有 1 MB Flash，不必纠结；真要抠体积再说"只保留 f32 表"的裁剪配置。
+
+4. 若懒得一个个挑：把 `Source\TransformFunctions` 与 `Source\CommonTables` 两个目录的文件**整目录加入**也能过，
+   只是编译慢、体积更大。
 
 ### 方案 C（最后一招）：先不依赖 DSP
 
@@ -249,9 +293,9 @@ if __name__ == "__main__":
 **只挑同一个 seq 的两组输出比**（不同窗的数据本来就不同，不能混着比）。比较表：
 
 | seq | 板上 #1 | PC #1 | 频率差 | 板上 #1 幅值 | PC #1 幅值 | 幅值相对差 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | | | | | | |
-| 2 | | | | | | |
+| --- | ----- | ----- | --- | -------- | -------- | ----- |
+| 1   |       |       |     |          |          |       |
+| 2   |       |       |     |          |          |       |
 
 验收：主要峰频率差 ≤1 格（0.98 Hz）；主要峰幅值相对差 ≤10%。
 对不上时按这个顺序二分：① 是不是同一个 seq；② 轴上是不是都取的 Z；③ 量程/灵敏度是否同源；
@@ -267,6 +311,7 @@ Q-03 记过"稳态每秒约 957 点"。这件事对 FFT 有直接影响：
 - 若暂停发生在**窗口内部**，这段窗就有时间断点，谱线会展宽、底部抬高，幅值也会不准。
 
 做法（不用示波器）：
+
 1. 在取窗前后各读一次 `app_sample_count()`，打印差值：满窗时差值应该正好是 1024；
    若小于 1024，说明**窗内有样本被丢**（此时先查是不是有别的 printf 占住了主循环）。
 2. 在主循环里把 `HAL_GetTick()` 和 `app_sample_count()` 一起打印，算"1024 点实际跨了多少毫秒"：
@@ -298,16 +343,16 @@ Q-03 记过"稳态每秒约 957 点"。这件事对 FFT 有直接影响：
 
 ## 报错对照表
 
-| 报错 / 现象 | 大概原因 | 怎么办 |
-| --- | --- | --- |
-| `cannot open source input file "arm_math.h"` | DSP 的 Include 路径没加 | 走第 1 步方案 A 或 B |
-| `undefined symbol arm_bitreversal_32` | 手工加文件时漏了反位序实现 | 加 `arm_bitreversal_32.c` 或 `arm_bitreversal2.S` |
-| `undefined symbol arm_radix8_butterfly_f32` | 漏了蝶形运算文件 | 加 `arm_radix8_butterfly_f32.c` |
-| `undefined symbol arm_common_tables` / 旋转因子表 | 漏了 `CommonTables` | 加 `arm_common_tables.c`、`arm_const_structs.c` |
-| `core_cm4.h` 相关重复定义 / 宏缺失 | RTE 的 CMSIS Core 与工程自带 CMSIS 撞车 | 取消勾 Core，或把 pack 的 Core\Include 加到 Include Paths 末尾 |
-| 串口打印 `%f` 出来是空白或乱码 | 浮点打印支持问题（本工程未用 microLIB，但没必要冒险） | 本模块已全部用整数打印（Hz 的百倍整数、mg），不要改回 `%f` |
-| 峰频率整体偏大 1.67 倍等 | 实际采样率与 `APP_FS_HZ` 不一致（历史上 `iic_delay` 改 10 µs 出过） | 先量实际采样率（第 7 步），再决定改 `iic_delay` |
-| 所有峰都在第 0/1 格 | `g_out` 打包格式取错，或忘了去均值 | 对照第 4.4 节注释 |
+| 报错 / 现象                                      | 大概原因                                               | 怎么办                                                                       |
+| -------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------- |
+| `cannot open source input file "arm_math.h"` | DSP 的 Include 路径没加                                 | 走第 1 步方案 A 或 B                                                            |
+| `undefined symbol arm_bitreversal_32`        | 手工加文件时漏了反位序实现                                      | 加 `TransformFunctions\arm_bitreversal2.c`（或 `arm_bitreversal2.S`，**二选一**） |
+| `undefined symbol arm_radix8_butterfly_f32`  | 漏了蝶形运算实现                                           | 加 `TransformFunctions\arm_cfft_radix8_f32.c`                              |
+| `undefined symbol arm_common_tables` / 旋转因子表 | 漏了 `CommonTables`                                  | 加 `arm_common_tables.c`、`arm_const_structs.c`                             |
+| `core_cm4.h` 相关重复定义 / 宏缺失                    | RTE 的 CMSIS Core 与工程自带 CMSIS 撞车                    | 取消勾 Core，或把 pack 的 Core\Include 加到 Include Paths 末尾                       |
+| 串口打印 `%f` 出来是空白或乱码                           | 浮点打印支持问题（本工程未用 microLIB，但没必要冒险）                    | 本模块已全部用整数打印（Hz 的百倍整数、mg），不要改回 `%f`                                        |
+| 峰频率整体偏大 1.67 倍等                              | 实际采样率与 `APP_FS_HZ` 不一致（历史上 `iic_delay` 改 10 µs 出过） | 先量实际采样率（第 7 步），再决定改 `iic_delay`                                           |
+| 所有峰都在第 0/1 格                                 | `g_out` 打包格式取错，或忘了去均值                              | 对照第 4.4 节注释                                                               |
 
 ---
 

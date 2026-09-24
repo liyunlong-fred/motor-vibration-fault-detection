@@ -1,0 +1,28 @@
+{
+  "schema_version": 3,
+  "axes": {
+    "measurement_axis": "X",
+    "gravity_axis": "Y"
+  },
+  "data_roles": ["formal", "debug", "selftest", "calibration"],
+  "source_types": ["real", "synthetic"],
+  "observed_conditions": ["baseline", "added_mass", "mount_looseness", "unknown"],
+  "target_labels": ["normal", "unbalance", "looseness", "unassigned"],
+  "target_from_condition": {
+    "baseline": "normal",
+    "added_mass": "unbalance",
+    "mount_looseness": "looseness",
+    "unknown": "unassigned"
+  },
+  "label_bases": ["controlled_injection", "unknown"],
+  "label_confidence": ["confirmed", "suspect", "unknown"],
+  "quality_statuses": ["pending", "pass", "reject"],
+  "paths": {
+    "formal_dir": "04_数据集/formal",
+    "debug_dir": "04_数据集/debug_raw",
+    "legacy_dir": "04_数据集/raw",
+    "manifest": "04_数据集/manifest.csv",
+    "processed_dir": "04_数据集/processed"
+  },
+  "excluded_form_fields": ["fixture_version", "sensor_id", "sensor_mount_id"]
+}
