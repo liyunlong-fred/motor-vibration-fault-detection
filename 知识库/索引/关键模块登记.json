@@ -35,6 +35,13 @@
     "role": "外设初始化与主循环调度"
   },
   {
+    "id": "FW-SYSTEM-BASE",
+    "name": "SYSTEM 基础支持",
+    "domain": "firmware",
+    "path": "00_工程文件/Drivers/SYSTEM/README.md",
+    "role": "延时、系统时钟与 USART 底层支持的职责说明和子目录入口"
+  },
+  {
     "id": "HW-IIC",
     "name": "软件 IIC 引脚定义",
     "domain": "hardware",

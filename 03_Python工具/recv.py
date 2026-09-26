@@ -2,7 +2,8 @@
 """从串口接收固件数据帧，并按统一标签契约落盘。
 
 旧版 ``04_数据集/raw`` 文件保持兼容但不再写入；正式数据写入
-``04_数据集/formal``，调试数据写入 ``04_数据集/debug_raw``。
+``04_数据集/formal``，调试数据写入 ``04_数据集/debug_raw``；板端文本日志写入
+``05_演示与输出/boardlog``。
 """
 
 import argparse
@@ -26,7 +27,7 @@ AXIS_EXPECT = metadata.MEASUREMENT_AXIS
 FORMAL_DIR = os.path.join(PROJ, "04_数据集", "formal")
 DEBUG_DIR = os.path.join(PROJ, "04_数据集", "debug_raw")
 MANIFEST = os.path.join(PROJ, "04_数据集", "manifest.csv")
-LOG_DIR = os.path.join(PROJ, "06_笔记与踩坑", "raw_logs")
+LOG_DIR = os.path.join(PROJ, "05_演示与输出", "boardlog")
 
 
 def build_parser():

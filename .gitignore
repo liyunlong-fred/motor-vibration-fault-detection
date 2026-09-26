@@ -54,8 +54,6 @@ GY521mpu-6050资料/
 04_数据集/raw/
 04_数据集/debug_raw/
 04_数据集/processed/
-06_笔记与踩坑/raw_logs/
-06_笔记与踩坑/*_boardlog.txt
 
 # ---------- 6. 系统 / 编辑器临时文件 ----------
 Thumbs.db
@@ -72,7 +70,7 @@ desktop.ini
 
 # ---------- 8. 仅本地保存，不上传云端 ----------
 /05_演示与输出/debug/
-/06_笔记与踩坑/raw_logs/
+/05_演示与输出/boardlog/
 
 # ---------- 9. Obsidian：只提交可复用配置，不提交个人界面状态 ----------
 .obsidian/workspace*.json
