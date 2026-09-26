@@ -14,6 +14,21 @@ static volatile uint32_t g_count   = 0;         /* 累计采样点数 */
 static volatile uint16_t g_overrun = 0;         /* 丢窗计数 */
 static volatile uint16_t g_seq     = 0;         /* 窗序号 */
 
+/* ================= 临时测量计数器 ================= */
+static volatile uint32_t g_tim_irq_total = 0;
+static volatile uint32_t g_read_fail_total = 0;
+
+static volatile uint32_t g_win_first_tick = 0;
+static volatile uint32_t g_win_last_tick = 0;
+static volatile uint32_t g_prev_win_last_tick = 0;
+static volatile uint32_t g_win_read_fail_begin = 0;
+
+static volatile uint32_t g_report_span_ticks = 0;
+static volatile uint32_t g_report_missed_ticks = 0;
+static volatile uint32_t g_report_boundary_gap = 0;
+static volatile uint32_t g_report_read_fail = 0;
+static volatile uint8_t  g_report_ready = 0;
+
 /* ================= 1、TIM、中断配置 ================= */
 /**
  * @brief       配置中断服务函数，指向HAL库的公共处理函数
@@ -34,6 +49,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == APP_TIM)      /* 确保溢出的TIM为采样所使用的TIM */
     {
+        g_tim_irq_total++;
         g_tick = 1;                     /* 标志位置1，处理留给main函数 */
     }
 }
@@ -102,25 +118,66 @@ void app_sample_task(void)
 {
     mpu6050_raw_t  r;             /* 类型：结构体变量，用于接收传感器读取数据 */
     sample_window_t *w;             /* 类型：指针，存放一窗数据的地址 */
+    uint32_t service_tick;
 
     if (!g_tick)   return;          /* 没到 1ms, 立刻返回 */
     g_tick = 0;                     /* 下一窗数据开始，先进行标志位清零 */
     if (g_paused)  return;          /* 发帧期间不采集样本, 保证窗内样本等间隔 */
 
-    if (app_source_read(&r) != 0)   /* 读失败: 本拍丢弃(会反映到采样率统计上) */
+    service_tick = g_tim_irq_total;
+
+    if (app_source_read(&r) != 0)
     {
+        g_read_fail_total++;
         return;
     }
 
     w = &g_win[g_fill];     /* 将双缓冲中正在写的那一窗的结构体取地址赋给 w */
+    if (g_widx == 0)
+    {
+        g_win_first_tick = service_tick;
+        g_win_read_fail_begin = g_read_fail_total;
+
+        if (g_prev_win_last_tick != 0)
+        {
+            g_report_boundary_gap =
+                g_win_first_tick - g_prev_win_last_tick - 1U;
+        }
+        else
+        {
+            g_report_boundary_gap = 0;
+        }
+    }
     w->x[g_widx] = r.x;     /* g -> 原始计数 */
     w->y[g_widx] = r.y;
     w->z[g_widx] = r.z;
     g_widx++;
     g_count++;
 
-    if (g_widx >= APP_FRAME_N)      /* 一窗攒满 */
+    if (g_widx >= APP_FRAME_N)      /* 一个窗口 */
     {
+        g_win_last_tick = service_tick;
+
+        g_report_span_ticks =
+            g_win_last_tick - g_win_first_tick;
+
+        if (g_report_span_ticks >= (APP_FRAME_N - 1U))
+        {
+            /* 总漏节拍 = 窗口内节拍间隔数 - 理想间隔数。 */
+            g_report_missed_ticks =
+                g_report_span_ticks - (APP_FRAME_N - 1U);
+        }
+        else
+        {
+            g_report_missed_ticks = 0;
+        }
+
+        g_report_read_fail =
+            g_read_fail_total - g_win_read_fail_begin;
+
+        g_prev_win_last_tick = g_win_last_tick;
+        g_report_ready = 1;
+
         w->n   = APP_FRAME_N;
         w->seq = ++g_seq;
 
@@ -148,3 +205,27 @@ void    app_sample_pause(uint8_t on)                { g_paused = on; }          
 //调试阶段使用
 uint32_t app_sample_count(void)                     { return g_count; }                     /* 返回开机至今累计采样点数，用法：窗满时的数值 - 开窗时的数值，用增量计算窗内采样点数是否正常 */
 uint16_t app_sample_overrun(void)                   { return g_overrun; }                   /* 返回累计丢窗数 */
+uint8_t app_sample_timing_get(
+    uint32_t *span_ticks,
+    uint32_t *missed_ticks,
+    uint32_t *boundary_gap,
+    uint32_t *read_fail)
+{
+    if ((span_ticks == 0) || (missed_ticks == 0) ||
+        (boundary_gap == 0) || (read_fail == 0))
+    {
+        return 0;
+    }
+
+    if (!g_report_ready)
+    {
+        return 0;
+    }
+
+    *span_ticks   = g_report_span_ticks;
+    *missed_ticks = g_report_missed_ticks;
+    *boundary_gap = g_report_boundary_gap;
+    *read_fail    = g_report_read_fail;
+    g_report_ready = 0;
+    return 1;
+}

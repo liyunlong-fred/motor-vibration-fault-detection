@@ -33,5 +33,11 @@ void app_sample_pause(uint8_t on);
 /* ---- 数据源: 内部按 APP_USE_FAKE_ACCEL 选择真/假 ---- */
 uint8_t app_source_read(mpu6050_raw_t *accel);   /* 0=成功 */
 
+uint8_t app_sample_timing_get(
+    uint32_t *span_ticks,
+    uint32_t *missed_ticks,
+    uint32_t *boundary_gap,
+    uint32_t *read_fail);
+
 #endif
 

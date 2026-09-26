@@ -47,11 +47,36 @@ int main(void)
         {
             const sample_window_t *w = app_sample_window_get();
             dsp_fft_result_t fft_res;
+            uint32_t span_ticks;
+            uint32_t missed_ticks;
+            uint32_t boundary_gap;
+            uint32_t read_fail;
 
             app_sample_pause(1);                /* 处理期间暂停采样, 保证窗内样本等间隔 */
             dsp_fft_run(w, 'X', &fft_res);      /* 先算 FFT(几百微秒) */
             dsp_fft_print(&fft_res);            /* 再打印(每窗 6 行, 几毫秒) */
             link_frame_send(w, 'X');            /* 原来的发帧照旧, 供 PC 对拍 */
+
+
+            if (app_sample_timing_get(
+                    &span_ticks,
+                    &missed_ticks,
+                    &boundary_gap,
+                    &read_fail) != 0)
+            {
+                APP_LOG(
+                    "TIM seq=%u span=%lu miss=%lu gap=%lu readfail=%lu",
+                    (unsigned)w->seq,
+                    (unsigned long)span_ticks,
+                    (unsigned long)missed_ticks,
+                    (unsigned long)boundary_gap,
+                    (unsigned long)read_fail);
+            }
+            else
+            {
+                APP_LOG("TIM seq=%u unavailable", (unsigned)w->seq);
+            }
+
             app_sample_pause(0);
 
             app_sample_window_release();
