@@ -117,6 +117,8 @@ def main(argv=None):
     seq_first = None
     seq_last = 0
     lost = 0
+    expected_sample_id = None
+    sample_id_gaps = 0
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(LOG_DIR, exist_ok=True)
     log_path = os.path.join(LOG_DIR, "%s_boardlog.txt" % stamp)
@@ -153,15 +155,21 @@ def main(argv=None):
                     lost += max(0, miss)
                     print("  !! 丢帧: 期望 %d，实收 %d (丢 %d 帧)" %
                           (seq_last + 1, frame["seq"], miss))
+                if (expected_sample_id is not None and
+                        frame["first_sample_id"] != expected_sample_id):
+                    sample_id_gaps += 1
+                    print("  !! 样本不连续: 期望 first_sample_id=%d，实收 %d" %
+                          (expected_sample_id, frame["first_sample_id"]))
                 if seq_first is None:
                     seq_first = frame["seq"]
                 seq_last = frame["seq"]
+                expected_sample_id = (frame["first_sample_id"] + frame["n"]) & 0xFFFFFFFF
                 axis = frame["axis"]
                 afs_code = frame["afs_code"]
                 datas.append(frame["data"])
-                print("  接收进度 [%2d/%2d] axis=%s seq=%d n=%d afs=%d" %
+                print("  接收进度 [%2d/%2d] axis=%s seq=%d first=%d n=%d afs=%d" %
                       (len(datas), args.frames, frame["axis"], frame["seq"],
-                       frame["n"], frame["afs_code"]))
+                       frame["first_sample_id"], frame["n"], frame["afs_code"]))
     except KeyboardInterrupt:
         print("\n[手动停止]")
     finally:
@@ -187,12 +195,17 @@ def main(argv=None):
         "first_seq": int(seq_first),
         "last_seq": int(seq_last),
         "lost_frames": int(lost),
+        "sample_id_gaps": int(sample_id_gaps),
+        "capture_mode": "fifo_continuous",
         "window_span_ms": 1000.0 * len(datas) * datas[0].size / frames.FS_HZ,
         "actual_fs_hz": frames.FS_HZ,
     })
     errors = metadata.validate(meta, require_capture=False)
     if errors:
         print("采集后元数据校验失败，不保存: %s" % "；".join(errors))
+        return 2
+    if args.data_role == "formal" and (lost != 0 or sample_id_gaps != 0):
+        print("正式数据拒绝写入：存在丢帧或样本不连续")
         return 2
     out_dir = FORMAL_DIR if args.data_role == "formal" else DEBUG_DIR
     os.makedirs(out_dir, exist_ok=True)
@@ -205,7 +218,8 @@ def main(argv=None):
         metadata.append_manifest(MANIFEST, os.path.join("formal", filename), meta)
 
     print("-" * 56)
-    print("共收到 %d 帧，丢帧 %d" % (len(datas), lost))
+    print("共收到 %d 帧，丢帧 %d，样本不连续 %d" %
+          (len(datas), lost, sample_id_gaps))
     print("已保存: %s  (%d 个样本)" % (path, all_data.size))
     if args.data_role == "formal":
         print("已登记: %s" % MANIFEST)

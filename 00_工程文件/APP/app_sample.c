@@ -1,150 +1,213 @@
 #include "app_sample.h"
-#include <math.h>                      /* 使用了库中的sinf——单浮点精度正弦函数 */
+#include <math.h>
 
-/* ================= 内部状态 ================= */
-static TIM_HandleTypeDef g_tim_handle;          /* TIM配置信息 */
-static volatile uint8_t  g_tick    = 0;         /* 1kHz 心跳标志 */
-static volatile uint8_t  g_paused  = 0;         /* 1=暂停采样(发帧期间) */
+#define APP_SLOT_INVALID 0xFFU
 
-static sample_window_t   g_win[2];              /* 双缓冲 */
-static volatile uint8_t  g_fill    = 0;         /* 正在写的那一半 */
-static volatile uint8_t  g_ready   = 0xFF;      /* 已填满待取的那一半, 0xFF=已被取走 */
-static volatile uint16_t g_widx    = 0;         /* 当前窗已写样本数 */
-static volatile uint32_t g_count   = 0;         /* 累计采样点数 */
-static volatile uint16_t g_overrun = 0;         /* 丢窗计数 */
-static volatile uint16_t g_seq     = 0;         /* 窗序号 */
+typedef enum
+{
+    APP_SLOT_FREE = 0,
+    APP_SLOT_FILLING,
+    APP_SLOT_READY,
+    APP_SLOT_PROCESSING
+} app_slot_state_t;
 
-/* ================= 1、TIM、中断配置 ================= */
-/**
- * @brief       配置中断服务函数，指向HAL库的公共处理函数
- * @param       无
- * @retval      无
- */
+static TIM_HandleTypeDef g_tim_handle;
+static volatile uint16_t g_pending_ticks;
+static sample_window_t g_win[APP_WINDOW_SLOT_COUNT];
+static app_slot_state_t g_slot_state[APP_WINDOW_SLOT_COUNT];
+static uint8_t g_ready_q[APP_WINDOW_SLOT_COUNT];
+static uint8_t g_ready_head;
+static uint8_t g_ready_tail;
+static uint8_t g_ready_count;
+static uint8_t g_fill;
+static uint8_t g_processing = APP_SLOT_INVALID;
+static uint16_t g_widx;
+static uint16_t g_seq;
+static uint32_t g_next_sample_id;
+static app_sample_stats_t g_stats;
+
 void APP_TIM_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&g_tim_handle);
 }
 
-/**
- * @brief       HAL 的更新中断回调: 这里只置标志, 处理在主循环中
- * @param       htim（handle TIM）：TIM句柄的指针，内部保存句柄的地址
- * @retval      无
- */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == APP_TIM)      /* 确保溢出的TIM为采样所使用的TIM */
+    if (htim->Instance == APP_TIM)
     {
-        g_tick = 1;                     /* 标志位置1，处理留给main函数 */
+        if (g_pending_ticks != 0xFFFFU) g_pending_ticks++;
     }
 }
 
-/**
- * @brief       采样初始化：配置TIM，使能中断，启动TIM
- * @param       无
- * @retval      无
- */
 void app_sample_init(void)
 {
-    APP_TIM_CLK_ENABLE();       /* 开启TIM时钟（未开启无法写入寄存器） */
+    uint8_t i;
 
-    g_tim_handle.Instance           = APP_TIM;                              /* 在app_config.h中定义所使用的TIM */
-    g_tim_handle.Init.Prescaler     = APP_TIM_CLK_HZ / 1000000U - 1U;       /* 84-1 -> 1MHz */
-    g_tim_handle.Init.CounterMode   = TIM_COUNTERMODE_UP;                   /* 向上计数模式 */
-    g_tim_handle.Init.Period        = 1000000U / APP_FS_HZ - 1U;            /* 计算分频系数1000-1 -> 1kHz */
-    g_tim_handle.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;               /* 采样时钟分频系数使用DIV1 */
-    g_tim_handle.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;   /* 不自动装载分频系数（更改Period立刻生效） */
-    HAL_TIM_Base_Init(&g_tim_handle);                                       /* 将配置写入对应寄存器 */
+    for (i = 0U; i < APP_WINDOW_SLOT_COUNT; i++) g_slot_state[i] = APP_SLOT_FREE;
+    g_slot_state[0] = APP_SLOT_FILLING;
+    g_ready_head = 0U;
+    g_ready_tail = 0U;
+    g_ready_count = 0U;
+    g_fill = 0U;
+    g_processing = APP_SLOT_INVALID;
+    g_widx = 0U;
+    g_seq = 0U;
+    g_next_sample_id = 0U;
+    g_pending_ticks = 0U;
 
-    __HAL_TIM_CLEAR_FLAG(&g_tim_handle, TIM_FLAG_UPDATE);                   /* 启动先将标志位清零 */
-    HAL_NVIC_SetPriority(APP_TIM_IRQn, 2, 0);                               /* 设置中断优先级（越小越高）：抢占优先级——2；响应优先级——0 */
-    HAL_NVIC_EnableIRQ(APP_TIM_IRQn);                                       /* 中断信号使能 */
-    HAL_TIM_Base_Start_IT(&g_tim_handle);                                   /* 启动TIM，并允许更新中断 */
+    APP_TIM_CLK_ENABLE();
+    g_tim_handle.Instance = APP_TIM;
+    g_tim_handle.Init.Prescaler = APP_TIM_CLK_HZ / 1000000U - 1U;
+    g_tim_handle.Init.CounterMode = TIM_COUNTERMODE_UP;
+    g_tim_handle.Init.Period = 1000000U / APP_FS_HZ - 1U;
+    g_tim_handle.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    g_tim_handle.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+    HAL_TIM_Base_Init(&g_tim_handle);
+    __HAL_TIM_CLEAR_FLAG(&g_tim_handle, TIM_FLAG_UPDATE);
+    HAL_NVIC_SetPriority(APP_TIM_IRQn, 2, 0);
+    HAL_NVIC_EnableIRQ(APP_TIM_IRQn);
+    HAL_TIM_Base_Start_IT(&g_tim_handle);
 }
 
-/* ================= 2、 数据源: 实际 / 模拟 ================= */
-/**
- * @brief       将选定数据源传入raw指向的结构体中：实际————直接传入MPU6050测量值，模拟————传入通过sin函数模拟出测试信号（参数写在app.config.h中）
- *              注意：调用一次只传入 ！一组！ 三轴加速度值，即进行一次采样，此函数每秒要进行数值为“采样频率”次数的调用
- * @param       raw：mpu6050所测加速度的存储地址
- * @retval      0, 成功; 1, 失败
- */
 uint8_t app_source_read(mpu6050_raw_t *raw)
 {
 #if APP_USE_FAKE_ACCEL
-    static uint32_t n = 0;                          /* 样本序号 = 假时间轴 */
-    float t = (float)n / (float)APP_FS_HZ;          /* 模拟时域信号的自变量时间 t ：[样本序号（第几次采样）n] * [采样频率的倒数（一次采样所需时间）] */
-    float fx, fy;                                   /* fx为 x 轴上模拟的风扇震动加速度，fy为 y 轴上的重力加速度（单位均为 g ） */
+    static uint32_t n = 0U;
+    float t = (float)n / (float)APP_FS_HZ;
+    float fx = APP_FAKE_A0_G * sinf(APP_2PI * APP_FAKE_F0_HZ * t)
+             + APP_FAKE_A1_G * sinf(APP_2PI * APP_FAKE_F1_HZ * t);
 
-    /* 以设定的频率，计算模拟信号的时域函数（单位为g） */
-    fx = APP_FAKE_A0_G * sinf(APP_2PI * APP_FAKE_F0_HZ * t)   /* 主频分量：  频率为APP_FAKE_F0_HZ */
-       + APP_FAKE_A1_G * sinf(APP_2PI * APP_FAKE_F1_HZ * t);  /* 二倍频分量：频率为APP_FAKE_F1_HZ */
-    fy = APP_FAKE_Y_G;                                        /* 假定重力加速度压在 Y 轴上 */
-    
-    /* 将单位从单浮点精度的g，转换成16位整型，方便传输（与传感器的原始数据保持一致） */
-    raw -> x = (int16_t)(fx * MPU6050_ACCEL_SENS);
-    raw -> y = (int16_t)(fy * MPU6050_ACCEL_SENS);
-    raw -> z = 0;
-
+    raw->x = (int16_t)(fx * MPU6050_ACCEL_SENS);
+    raw->y = (int16_t)(APP_FAKE_Y_G * MPU6050_ACCEL_SENS);
+    raw->z = 0;
     n++;
     return 0;
 #else
-    return mpu6050_read_raw(raw);               /* 传感器数据走这里，直接原始数据 */
+    return mpu6050_read_raw(raw);
 #endif
 }
 
-/* ================= 3、 主循环任务 ================= */
-/**
- * @brief       
- * @param       
- * @retval      
- */
-void app_sample_task(void)
+static uint8_t app_find_free_slot(void)
 {
-    mpu6050_raw_t  r;             /* 类型：结构体变量，用于接收传感器读取数据 */
-    sample_window_t *w;             /* 类型：指针，存放一窗数据的地址 */
-
-    if (!g_tick)   return;          /* 没到 1ms, 立刻返回 */
-    g_tick = 0;                     /* 下一窗数据开始，先进行标志位清零 */
-    if (g_paused)  return;          /* 发帧期间不采集样本, 保证窗内样本等间隔 */
-
-    if (app_source_read(&r) != 0)   /* 读失败: 本拍丢弃(会反映到采样率统计上) */
+    uint8_t i;
+    for (i = 0U; i < APP_WINDOW_SLOT_COUNT; i++)
     {
+        if (g_slot_state[i] == APP_SLOT_FREE) return i;
+    }
+    return APP_SLOT_INVALID;
+}
+
+static void app_discard_partial_window(void)
+{
+    g_widx = 0U;
+    g_next_sample_id++;       /* explicit gap marker; never claim continuity after loss */
+    g_stats.continuity_breaks++;
+}
+
+static void app_push_sample(const mpu6050_raw_t *r)
+{
+    sample_window_t *w = &g_win[g_fill];
+    uint8_t next_fill;
+
+    if (g_widx == 0U) w->first_sample_id = g_next_sample_id;
+    w->x[g_widx] = r->x;
+    w->y[g_widx] = r->y;
+    w->z[g_widx] = r->z;
+    g_widx++;
+    g_next_sample_id++;
+    g_stats.samples_captured++;
+
+    if (g_widx < APP_FRAME_N) return;
+
+    w->n = APP_FRAME_N;
+    w->seq = ++g_seq;
+    next_fill = app_find_free_slot();
+    if (next_fill == APP_SLOT_INVALID)
+    {
+        /* All other slots are READY/PROCESSING. Drop this full window rather
+         * than overwrite consumer-owned memory, then expose a continuity gap. */
+        g_stats.window_drop++;
+        app_discard_partial_window();
         return;
     }
 
-    w = &g_win[g_fill];     /* 将双缓冲中正在写的那一窗的结构体取地址赋给 w */
-    w->x[g_widx] = r.x;     /* g -> 原始计数 */
-    w->y[g_widx] = r.y;
-    w->z[g_widx] = r.z;
-    g_widx++;
-    g_count++;
-
-    if (g_widx >= APP_FRAME_N)      /* 一窗攒满 */
-    {
-        w->n   = APP_FRAME_N;
-        w->seq = ++g_seq;
-
-        if (g_ready != 0xFF)        /* 上一窗还没被取走 */
-        {
-            g_overrun++;
-        }
-        g_ready = g_fill;           /* 交出满窗 */
-        g_fill ^= 1;                /* 0与1来回切换，意思是换另一半继续写 */
-        g_widx  = 0;                /* 将当前窗已采样数清零 */
-    }
+    g_slot_state[g_fill] = APP_SLOT_READY;
+    g_ready_q[g_ready_head] = g_fill;
+    g_ready_head = (uint8_t)((g_ready_head + 1U) % APP_WINDOW_SLOT_COUNT);
+    g_ready_count++;
+    g_fill = next_fill;
+    g_slot_state[g_fill] = APP_SLOT_FILLING;
+    g_widx = 0U;
 }
 
-/* ================= 4、 对外接口 ================= */
-//正常工作调用
-uint8_t app_sample_window_ready(void)               { return (g_ready != 0xFF) ? 1 : 0; }   /* 是否能取————判断是否满窗：满窗返回1，无满窗返回0 */
-const sample_window_t *app_sample_window_get(void)                                          /* 取数据————返回满窗所在的结构体指针 */
+void app_sample_task(void)
 {
-    if (g_ready == 0xFF) return 0;      /* 没有满窗, 返回空指针 */
-    return &g_win[g_ready];
-}
-void    app_sample_window_release(void)             { g_ready = 0xFF; }                     /* 结束使用————将 “g_ready” 置于默认值 0xFF */
-void    app_sample_pause(uint8_t on)                { g_paused = on; }                      /* 发送前暂停，发送后继续————“on” 为 1 ：app_sample_task暂停采样；“on” 为 0 ：正常采样 */
+    uint16_t due;
 
-//调试阶段使用
-uint32_t app_sample_count(void)                     { return g_count; }                     /* 返回开机至今累计采样点数，用法：窗满时的数值 - 开窗时的数值，用增量计算窗内采样点数是否正常 */
-uint16_t app_sample_overrun(void)                   { return g_overrun; }                   /* 返回累计丢窗数 */
+    if (g_pending_ticks == 0U) return;
+    __disable_irq();
+    due = g_pending_ticks;
+    g_pending_ticks = 0U;
+    __enable_irq();
+
+#if APP_USE_FAKE_ACCEL
+    while (due-- != 0U)
+    {
+        mpu6050_raw_t raw;
+        if (app_source_read(&raw) == 0U) app_push_sample(&raw);
+        else g_stats.iic_read_fail++;
+    }
+#else
+    {
+        mpu6050_raw_t raw[APP_FIFO_DRAIN_BATCH];
+        uint16_t read = 0U;
+        uint8_t rc;
+        (void)due;
+        rc = mpu6050_fifo_read_raw(raw, APP_FIFO_DRAIN_BATCH, &read);
+        if (rc == 2U)
+        {
+            g_stats.fifo_overflow++;
+            app_discard_partial_window();
+            return;
+        }
+        if (rc != 0U)
+        {
+            g_stats.iic_read_fail++;
+            return;
+        }
+        if (read > g_stats.max_fifo_batch) g_stats.max_fifo_batch = read;
+        for (uint16_t i = 0U; i < read; i++) app_push_sample(&raw[i]);
+    }
+#endif
+}
+
+uint8_t app_sample_window_ready(void)
+{
+    return (g_ready_count != 0U) ? 1U : 0U;
+}
+
+const sample_window_t *app_sample_window_get(void)
+{
+    uint8_t slot;
+    if ((g_processing != APP_SLOT_INVALID) || (g_ready_count == 0U)) return 0;
+    slot = g_ready_q[g_ready_tail];
+    g_ready_tail = (uint8_t)((g_ready_tail + 1U) % APP_WINDOW_SLOT_COUNT);
+    g_ready_count--;
+    g_slot_state[slot] = APP_SLOT_PROCESSING;
+    g_processing = slot;
+    return &g_win[slot];
+}
+
+void app_sample_window_release(void)
+{
+    if (g_processing == APP_SLOT_INVALID) return;
+    g_slot_state[g_processing] = APP_SLOT_FREE;
+    g_processing = APP_SLOT_INVALID;
+}
+
+uint32_t app_sample_count(void) { return g_stats.samples_captured; }
+uint16_t app_sample_overrun(void) { return g_stats.window_drop; }
+void app_sample_stats_get(app_sample_stats_t *out)
+{
+    if (out != 0) *out = g_stats;
+}

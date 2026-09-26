@@ -7,7 +7,18 @@
 
 /* ================= 1、采样与窗 ================= */
 #define APP_FS_HZ           1000U       /* 采样率: 1kHz */
-#define APP_FRAME_N         1024U       /* 一窗/一帧的样本数 */
+#define APP_FRAME_N         1024U       /* one FFT window */
+
+/* Continuous FIFO capture configuration. */
+#define APP_FIFO_DRAIN_BATCH    16U
+#define APP_WINDOW_SLOT_COUNT    3U
+
+#if (APP_WINDOW_SLOT_COUNT < 3U)
+#error "continuous capture requires at least three window slots"
+#endif
+#if ((APP_FIFO_DRAIN_BATCH == 0U) || (APP_FIFO_DRAIN_BATCH > 16U))
+#error "invalid FIFO drain batch"
+#endif
 
 /* ================= 2、时基 TIM ================= */
 #define APP_TIM                 TIM3
@@ -36,6 +47,7 @@
 /* ================= 5、串口与调试 ================= */
 #define APP_UART_BAUD       460800U
 
+#define APP_FFT_VERBOSE     0       /* per-window peak logs; keep off during capture */
 #define APP_DEBUG           1
 #if APP_DEBUG
 #define APP_LOG(...)        app_log(__VA_ARGS__)

@@ -8,7 +8,8 @@
     偏移 4    2 byte   窗序号 seq
     偏移 6    2 byte   样本数 n
     偏移 8    1 byte   量程码 AFS_SEL (0=±2g 1=±4g 2=±8g 3=±16g)
-    偏移 9   2n byte   原始数据 int16 小端
+    偏移 9    4 byte   窗首样本编号 first_sample_id（无符号，小端）
+    偏移 13  2n byte   原始数据 int16 小端
 整条链路只传 int16 原始计数, 换算成 g 只在本文件 to_g() 里做
 """
 import numpy as np
@@ -17,7 +18,9 @@ HEAD       = b"\x5a\x5a"      # 帧头字节（b代表字节串）
 HEAD0      = 0x5A
 HEAD1      = 0x5A
 TYPE_ACCEL = 1                # 类型码: 加速度样本块
-OVERHEAD   = 9                # 数据区之前的固定开销(字节)
+TEXT_OVERHEAD  = 9            # 文本帧固定开销(字节)
+ACCEL_OVERHEAD = 13           # 加速度帧固定开销(字节)
+OVERHEAD       = ACCEL_OVERHEAD  # 兼容旧调用方：加速度帧开销
 FS_HZ      = 1000             # 采样率（Hz）
 MAX_N      = 1024             # 单帧最大样本数
 AXIS_OK    = (ord("X"), ord("Y"), ord("Z"))                     # ord：把单字符转换成ASCII码    # 元组（只读数组）
@@ -39,7 +42,7 @@ def parse_frame(buf, pos=0):
         "more" : 数据还不够一帧, 需要继续接收
         "bad"  : 此处不是合法帧(数据里恰好出现的假帧头), 调用者应跳过 1 字节重找
     """
-    if len(buf) - pos < OVERHEAD:
+    if len(buf) - pos < TEXT_OVERHEAD:
         return ("more", None, 0)
     if buf[pos] != HEAD0 or buf[pos + 1] != HEAD1:
         return ("bad", None, 0)
@@ -54,14 +57,16 @@ def parse_frame(buf, pos=0):
         if (axis not in AXIS_OK) or (cnt < 1) or (cnt > MAX_N) or (afs_code not in SENS):
             return ("bad", None, 0)
         payload = 2 * cnt                               # 每样本 2 字节
+        header_len = ACCEL_OVERHEAD
     elif ftype == TYPE_TEXT:                            # 类型 2: 文本日志行
         if (cnt < 1) or (cnt > TEXT_MAX):
             return ("bad", None, 0)
         payload = cnt                                   # 文本是 1 字节 1 个字符
+        header_len = TEXT_OVERHEAD
     else:                                               # 类型不认识: 当假帧头处理
         return ("bad", None, 0)
 
-    total = OVERHEAD + payload                          # 计算帧长
+    total = header_len + payload                        # 计算帧长
 
     if len(buf) - pos < total:
         return ("more", None, 0)                        # 剩余字节不够一整帧
@@ -69,10 +74,13 @@ def parse_frame(buf, pos=0):
     # buf[]——对buf的数据部分切片，bytes()——转化成只读的字节
     # xx.frombuffer(xxx, dtype="xxx")——按指定格式解释成数组，"<i2"——小端、有符号整数、两字节
     # 将buf的 “数据部分” 按 “小端、有符号整数、两字节” 解释成数组，存入 data
-    body = bytes(buf[pos + OVERHEAD: pos + total])
+    body = bytes(buf[pos + header_len: pos + total])
 
     if ftype == TYPE_ACCEL:
+        first_sample_id = (buf[pos + 9] | (buf[pos + 10] << 8) |
+                           (buf[pos + 11] << 16) | (buf[pos + 12] << 24))
         frame = {"type": ftype, "axis": chr(axis), "seq": seq, "n": cnt,
+                 "first_sample_id": first_sample_id,
                  "afs_code": afs_code, "data": np.frombuffer(body, dtype="<i2"),
                  "length": total}
     else:

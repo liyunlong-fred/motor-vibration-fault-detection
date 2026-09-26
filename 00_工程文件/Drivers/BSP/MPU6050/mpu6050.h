@@ -166,6 +166,9 @@
  *  [!] 开始新一段采集前必须先 FIFO_RESET, 否则上段残留会让样本错位
  */
 
+#define MPU6050_FIFO_CAPACITY_BYTES  1024U
+#define MPU6050_FIFO_ACCEL_BYTES      6U
+
 #define MPU6050_WHO_AM_I        0x75
 /*  只读寄存器
  *  bit7     : 保留
@@ -247,7 +250,10 @@ typedef struct
 /* ==================== 函数声明 ==================== */
 uint8_t mpu6050_init(void);                             /* 0=成功, 其他=失败步骤号 */
 uint8_t mpu6050_who_am_i(void);                         /* 读器件ID */
-uint8_t mpu6050_read_raw(mpu6050_raw_t *raw);           /* 读三轴原始值, 0=成功 */
+uint8_t mpu6050_read_raw(mpu6050_raw_t *raw);
+uint8_t mpu6050_fifo_reset(void);
+uint8_t mpu6050_fifo_read_raw(mpu6050_raw_t *out, uint16_t max_samples,
+                              uint16_t *samples_read);
 uint8_t mpu6050_read_accel(mpu6050_accel_t *accel);     /* 读三轴加速度(g), 0=成功 */
 float   mpu6050_read_temp(void);                        /* 读温度(℃) */
 

@@ -35,7 +35,6 @@ uint8_t mpu6050_init(void)
     id = mpu6050_who_am_i();
     if (id == 0x00 || id == 0xFF) return 2;
     /* 兼容芯片可能报 0x60/0x70/0x72/0x98 等, 只记录不判死 */
-    printf("MPU6050 WHO_AM_I = 0x%02X (非 0x68 也可能是兼容芯片)\r\n", id);
 
     /* --- 3. 唤醒 + 时钟源选 X 轴陀螺 PLL (复位后是 0x40 睡眠态) --- */
     if (iic_reg_write(MPU6050_ADDR, MPU6050_PWR_MGMT_1, 0x01)) return 3;
@@ -54,6 +53,9 @@ uint8_t mpu6050_init(void)
     if (iic_reg_write(MPU6050_ADDR, MPU6050_ACCEL_CONFIG, MPU6050_ACCEL_CONFIG_VAL)) return 6;
 
     /* --- 7. 回读校验: 只要 SLEEP 位(bit6)清了就算成功 --- */
+    /* Configure accelerometer-only FIFO before capture starts. */
+    if (mpu6050_fifo_reset() != 0) return 7;
+
     if (iic_reg_read_length(MPU6050_ADDR, MPU6050_PWR_MGMT_1, &tmp, 1)) return 7;
     if (tmp & 0x40) return 8;               /* 还在睡眠 -> 写没生效 */
 
@@ -83,6 +85,57 @@ uint8_t mpu6050_read_raw(mpu6050_raw_t *raw)
  * @param       accel: 结果结构体指针
  * @retval      0, 成功; 1, 失败
  */
+/* Reset then enable the accelerometer-only FIFO. */
+uint8_t mpu6050_fifo_reset(void)
+{
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_FIFO_EN, 0x00)) return 1;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_USER_CTRL, 0x04)) return 1;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_USER_CTRL, 0x40)) return 1;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_FIFO_EN, 0x08)) return 1;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_INT_ENABLE, 0x10)) return 1;
+    return 0;
+}
+
+/* Read complete XYZ records from FIFO_R_W. FIFO overflow is reported,
+ * reset, and left to the caller to mark a discontinuity. */
+uint8_t mpu6050_fifo_read_raw(mpu6050_raw_t *out, uint16_t max_samples,
+                              uint16_t *samples_read)
+{
+    uint8_t count_buf[2], status;
+    uint8_t bytes[MPU6050_FIFO_ACCEL_BYTES * 16U];
+    uint16_t available, take, i;
+
+    if ((out == 0) || (samples_read == 0) || (max_samples == 0U) || (max_samples > 16U)) return 1;
+    *samples_read = 0U;
+    if (iic_reg_read_length(MPU6050_ADDR, MPU6050_INT_STATUS, &status, 1)) return 1;
+    if (status & 0x10U)
+    {
+        (void)mpu6050_fifo_reset();
+        return 2;
+    }
+    if (iic_reg_read_length(MPU6050_ADDR, MPU6050_FIFO_COUNTH, count_buf, 2)) return 1;
+    available = (uint16_t)(((uint16_t)count_buf[0] << 8) | count_buf[1]);
+    if (available >= MPU6050_FIFO_CAPACITY_BYTES)
+    {
+        (void)mpu6050_fifo_reset();
+        return 2;
+    }
+    take = (uint16_t)(available / MPU6050_FIFO_ACCEL_BYTES);
+    if (take > max_samples) take = max_samples;
+    if (take == 0U) return 0;
+    if (iic_reg_read_length(MPU6050_ADDR, MPU6050_FIFO_R_W, bytes,
+                            (uint16_t)(take * MPU6050_FIFO_ACCEL_BYTES))) return 1;
+    for (i = 0U; i < take; i++)
+    {
+        uint16_t base = (uint16_t)(i * MPU6050_FIFO_ACCEL_BYTES);
+        out[i].x = (int16_t)(((uint16_t)bytes[base] << 8) | bytes[base + 1U]);
+        out[i].y = (int16_t)(((uint16_t)bytes[base + 2U] << 8) | bytes[base + 3U]);
+        out[i].z = (int16_t)(((uint16_t)bytes[base + 4U] << 8) | bytes[base + 5U]);
+    }
+    *samples_read = take;
+    return 0;
+}
+
 uint8_t mpu6050_read_accel(mpu6050_accel_t *accel)
 {
     mpu6050_raw_t raw;
@@ -111,4 +164,3 @@ float mpu6050_read_temp(void)
     raw = (int16_t)(((uint16_t)buf[0] << 8) | buf[1]);
     return raw / 340.0f + 36.53f;
 }
-

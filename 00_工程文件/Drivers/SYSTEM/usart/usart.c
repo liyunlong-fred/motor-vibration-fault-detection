@@ -1,233 +1,224 @@
-/**
- ****************************************************************************************************
- * @file        usart.c
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.1
- * @date        2023-06-05
- * @brief       串口初始化代码(一般是串口1)，支持printf
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
- * @attention
- *
- * 实验平台:正点原子 探索者 F407开发板
- * 在线视频:www.yuanzige.com
- * 技术论坛:www.openedv.com
- * 公司网址:www.alientek.com
- * 购买地址:openedv.taobao.com
- *
- * 修改说明
- * V1.0 20211014
- * 第一次发布
- * V1.1 20230605
- * 删除USART_UX_IRQHandler()函数的超时处理和修改HAL_UART_RxCpltCallback()
- ****************************************************************************************************
- */
-
 #include "./SYSTEM/sys/sys.h"
 #include "./SYSTEM/usart/usart.h"
+#include <string.h>
 
-
-/* 如果使用os,则包括下面的头文件即可 */
 #if SYS_SUPPORT_OS
-#include "os.h"                               /* os 使用 */
+#include "os.h"
 #endif
 
-/******************************************************************************************/
-/* 加入以下代码, 支持printf函数, 而不需要选择use MicroLIB */
-
-#if 1
-#if (__ARMCC_VERSION >= 6010050)                    /* 使用AC6编译器时 */
-__asm(".global __use_no_semihosting\n\t");          /* 声明不使用半主机模式 */
-__asm(".global __ARM_use_no_argv \n\t");            /* AC6下需要声明main函数为无参数格式，否则部分例程可能出现半主机模式 */
-
+#if (__ARMCC_VERSION >= 6010050)
+__asm(".global __use_no_semihosting\n\t");
+__asm(".global __ARM_use_no_argv \n\t");
 #else
-/* 使用AC5编译器时, 要在这里定义__FILE 和 不使用半主机模式 */
 #pragma import(__use_no_semihosting)
-
-struct __FILE
-{
-    int handle;
-    /* Whatever you require here. If the only file you are using is */
-    /* standard output using printf() for debugging, no file handling */
-    /* is required. */
-};
-
+struct __FILE { int handle; };
 #endif
 
-/* 不使用半主机模式，至少需要重定义_ttywrch\_sys_exit\_sys_command_string函数,以同时兼容AC6和AC5模式 */
-int _ttywrch(int ch)
-{
-    ch = ch;
-    return ch;
-}
-
-/* 定义_sys_exit()以避免使用半主机模式 */
-void _sys_exit(int x)
-{
-    x = x;
-}
-
-char *_sys_command_string(char *cmd, int len)
-{
-    return NULL;
-}
-
-/* FILE 在 stdio.h里面定义. */
+int _ttywrch(int ch) { return ch; }
+void _sys_exit(int x) { (void)x; }
+char *_sys_command_string(char *cmd, int len) { (void)cmd; (void)len; return NULL; }
 FILE __stdout;
 
-/* 重定义fputc函数, printf函数最终会通过调用fputc输出字符串到串口 */
+/* Only retained for early boot diagnostics. Runtime logging uses TX DMA queue. */
 int fputc(int ch, FILE *f)
 {
-    while ((USART1->SR & 0X40) == 0);               /* 等待上一个字符发送完成 */
-
-    USART1->DR = (uint8_t)ch;                       /* 将要发送的字符 ch 写入到DR寄存器 */
+    (void)f;
+    while ((USART1->SR & USART_SR_TC) == 0U) {}
+    USART1->DR = (uint8_t)ch;
     return ch;
 }
-#endif
-/***********************************************END*******************************************/
-    
-#if USART_EN_RX                                     /* 如果使能了接收 */
 
-/* 接收缓冲, 最大USART_REC_LEN个字节. */
 uint8_t g_usart_rx_buf[USART_REC_LEN];
+uint16_t g_usart_rx_sta;
+uint8_t g_rx_buffer[RXBUFFERSIZE];
+UART_HandleTypeDef g_uart1_handle;
 
-/*  接收状态
- *  bit15，      接收完成标志
- *  bit14，      接收到0x0d
- *  bit13~0，    接收到的有效字节数目
-*/
-uint16_t g_usart_rx_sta = 0;
+static DMA_HandleTypeDef g_uart1_tx_dma;
+static uint8_t g_tx_data[USART_TX_QUEUE_DEPTH][USART_TX_MAX_LEN];
+static uint16_t g_tx_len[USART_TX_QUEUE_DEPTH];
+static volatile uint8_t g_tx_head;
+static volatile uint8_t g_tx_tail;
+static volatile uint8_t g_tx_count;
+static volatile uint8_t g_tx_busy;
+static volatile uint16_t g_tx_dropped;
+static volatile uint16_t g_tx_error_count;
 
-uint8_t g_rx_buffer[RXBUFFERSIZE];                  /* HAL库使用的串口接收缓冲 */
+static void usart_tx_start_next(void)
+{
+    while (g_tx_count != 0U)
+    {
+        g_tx_busy = 1U;
+        if (HAL_UART_Transmit_DMA(&g_uart1_handle, g_tx_data[g_tx_tail],
+                                  g_tx_len[g_tx_tail]) == HAL_OK)
+        {
+            return;
+        }
+        g_tx_error_count++;
+        g_tx_tail = (uint8_t)((g_tx_tail + 1U) % USART_TX_QUEUE_DEPTH);
+        g_tx_count--;
+        g_tx_busy = 0U;
+    }
+    g_tx_busy = 0U;
+}
 
-UART_HandleTypeDef g_uart1_handle;                  /* UART句柄 */
+uint8_t usart_tx_enqueue(const uint8_t *data, uint16_t len)
+{
+    uint8_t slot;
+    uint32_t primask;
 
+    if ((data == 0) || (len == 0U) || (len > USART_TX_MAX_LEN)) return 1U;
 
-/**
- * @brief       串口X初始化函数
- * @param       baudrate: 波特率, 根据自己需要设置波特率值
- * @note        注意: 必须设置正确的时钟源, 否则串口波特率就会设置异常.
- *              这里的USART的时钟源在sys_stm32_clock_init()函数中已经设置过了.
- * @retval      无
- */
+    /* The producer is main context.  Copy before publishing the slot to DMA ISR. */
+    if (g_tx_count >= USART_TX_QUEUE_DEPTH)
+    {
+        g_tx_dropped++;
+        return 1U;
+    }
+    slot = g_tx_head;
+    memcpy(g_tx_data[slot], data, len);
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if (g_tx_count >= USART_TX_QUEUE_DEPTH)
+    {
+        g_tx_dropped++;
+        if (primask == 0U) __enable_irq();
+        return 1U;
+    }
+    g_tx_len[slot] = len;
+    g_tx_head = (uint8_t)((g_tx_head + 1U) % USART_TX_QUEUE_DEPTH);
+    g_tx_count++;
+    if (g_tx_busy == 0U) usart_tx_start_next();
+    if (primask == 0U) __enable_irq();
+    return 0U;
+}
+
+uint16_t usart_tx_dropped(void) { return g_tx_dropped; }
+uint16_t usart_tx_errors(void) { return g_tx_error_count; }
+
 void usart_init(uint32_t baudrate)
 {
-    g_uart1_handle.Instance = USART_UX;                         /* USART1 */
-    g_uart1_handle.Init.BaudRate = baudrate;                    /* 波特率 */
-    g_uart1_handle.Init.WordLength = UART_WORDLENGTH_8B;        /* 字长为8位数据格式 */
-    g_uart1_handle.Init.StopBits = UART_STOPBITS_1;             /* 一个停止位 */
-    g_uart1_handle.Init.Parity = UART_PARITY_NONE;              /* 无奇偶校验位 */
-    g_uart1_handle.Init.HwFlowCtl = UART_HWCONTROL_NONE;        /* 无硬件流控 */
-    g_uart1_handle.Init.Mode = UART_MODE_TX_RX;                 /* 收发模式 */
-    HAL_UART_Init(&g_uart1_handle);                             /* HAL_UART_Init()会使能UART1 */
-    
-    /* 该函数会开启接收中断：标志位UART_IT_RXNE，并且设置接收缓冲以及接收缓冲接收最大数据量 */
-    HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t *)g_rx_buffer, RXBUFFERSIZE);
+    g_uart1_handle.Instance = USART_UX;
+    g_uart1_handle.Init.BaudRate = baudrate;
+    g_uart1_handle.Init.WordLength = UART_WORDLENGTH_8B;
+    g_uart1_handle.Init.StopBits = UART_STOPBITS_1;
+    g_uart1_handle.Init.Parity = UART_PARITY_NONE;
+    g_uart1_handle.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    g_uart1_handle.Init.Mode = UART_MODE_TX_RX;
+    HAL_UART_Init(&g_uart1_handle);
+    HAL_UART_Receive_IT(&g_uart1_handle, g_rx_buffer, RXBUFFERSIZE);
 }
 
-/**
- * @brief       UART底层初始化函数
- * @param       huart: UART句柄类型指针
- * @note        此函数会被HAL_UART_Init()调用
- *              完成时钟使能，引脚配置，中断配置
- * @retval      无
- */
 void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 {
-    GPIO_InitTypeDef gpio_init_struct;
-    if(huart->Instance == USART_UX)                             /* 如果是串口1，进行串口1 MSP初始化 */
-    {
-        USART_UX_CLK_ENABLE();                                  /* USART1 时钟使能 */
-        USART_TX_GPIO_CLK_ENABLE();                             /* 发送引脚时钟使能 */
-        USART_RX_GPIO_CLK_ENABLE();                             /* 接收引脚时钟使能 */
+    GPIO_InitTypeDef gpio;
+    if (huart->Instance != USART_UX) return;
 
-        gpio_init_struct.Pin = USART_TX_GPIO_PIN;               /* TX引脚 */
-        gpio_init_struct.Mode = GPIO_MODE_AF_PP;                /* 复用推挽输出 */
-        gpio_init_struct.Pull = GPIO_PULLUP;                    /* 上拉 */
-        gpio_init_struct.Speed = GPIO_SPEED_FREQ_HIGH;          /* 高速 */
-        gpio_init_struct.Alternate = USART_TX_GPIO_AF;          /* 复用为USART1 */
-        HAL_GPIO_Init(USART_TX_GPIO_PORT, &gpio_init_struct);   /* 初始化发送引脚 */
+    USART_UX_CLK_ENABLE();
+    USART_TX_GPIO_CLK_ENABLE();
+    USART_RX_GPIO_CLK_ENABLE();
+    gpio.Pin = USART_TX_GPIO_PIN;
+    gpio.Mode = GPIO_MODE_AF_PP;
+    gpio.Pull = GPIO_PULLUP;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Alternate = USART_TX_GPIO_AF;
+    HAL_GPIO_Init(USART_TX_GPIO_PORT, &gpio);
+    gpio.Pin = USART_RX_GPIO_PIN;
+    gpio.Alternate = USART_RX_GPIO_AF;
+    HAL_GPIO_Init(USART_RX_GPIO_PORT, &gpio);
 
-        gpio_init_struct.Pin = USART_RX_GPIO_PIN;               /* RX引脚 */
-        gpio_init_struct.Alternate = USART_RX_GPIO_AF;          /* 复用为USART1 */
-        HAL_GPIO_Init(USART_RX_GPIO_PORT, &gpio_init_struct);   /* 初始化接收引脚 */
+    __HAL_RCC_DMA2_CLK_ENABLE();
+    g_uart1_tx_dma.Instance = DMA2_Stream7;
+    g_uart1_tx_dma.Init.Channel = DMA_CHANNEL_4;
+    g_uart1_tx_dma.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    g_uart1_tx_dma.Init.PeriphInc = DMA_PINC_DISABLE;
+    g_uart1_tx_dma.Init.MemInc = DMA_MINC_ENABLE;
+    g_uart1_tx_dma.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    g_uart1_tx_dma.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    g_uart1_tx_dma.Init.Mode = DMA_NORMAL;
+    g_uart1_tx_dma.Init.Priority = DMA_PRIORITY_LOW;
+    g_uart1_tx_dma.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    (void)HAL_DMA_Init(&g_uart1_tx_dma);
+    __HAL_LINKDMA(huart, hdmatx, g_uart1_tx_dma);
 
-#if USART_EN_RX
-        HAL_NVIC_EnableIRQ(USART_UX_IRQn);                      /* 使能USART1中断通道 */
-        HAL_NVIC_SetPriority(USART_UX_IRQn, 3, 3);              /* 抢占优先级3，子优先级3 */
-#endif
-    }
+    HAL_NVIC_SetPriority(USART_UX_IRQn, 3, 3);
+    HAL_NVIC_EnableIRQ(USART_UX_IRQn);
+    HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 3, 2);
+    HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
 }
 
-/**
- * @brief       Rx传输回调函数
- * @param       huart: UART句柄类型指针
- * @retval      无
- */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if(huart->Instance == USART_UX)             /* 如果是串口1 */
+    if (huart->Instance != USART_UX) return;
+    if ((g_usart_rx_sta & 0x8000U) == 0U)
     {
-        if((g_usart_rx_sta & 0x8000) == 0)      /* 接收未完成 */
+        if (g_usart_rx_sta & 0x4000U)
         {
-            if(g_usart_rx_sta & 0x4000)         /* 接收到了0x0d */
-            {
-                if(g_rx_buffer[0] != 0x0a) 
-                {
-                    g_usart_rx_sta = 0;         /* 接收错误,重新开始 */
-                }
-                else 
-                {
-                    g_usart_rx_sta |= 0x8000;   /* 接收完成了 */
-                }
-            }
-            else                                /* 还没收到0X0D */
-            {
-                if(g_rx_buffer[0] == 0x0d)
-                {
-                    g_usart_rx_sta |= 0x4000;
-                }
-                else
-                {
-                    g_usart_rx_buf[g_usart_rx_sta & 0X3FFF] = g_rx_buffer[0] ;
-                    g_usart_rx_sta++;
-                    if(g_usart_rx_sta > (USART_REC_LEN - 1))
-                    {
-                        g_usart_rx_sta = 0;     /* 接收数据错误,重新开始接收 */
-                    }
-                }
-            }
+            if (g_rx_buffer[0] != 0x0AU) g_usart_rx_sta = 0U;
+            else g_usart_rx_sta |= 0x8000U;
         }
-        
-        HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t *)g_rx_buffer, RXBUFFERSIZE);
+        else if (g_rx_buffer[0] == 0x0DU)
+        {
+            g_usart_rx_sta |= 0x4000U;
+        }
+        else
+        {
+            g_usart_rx_buf[g_usart_rx_sta & 0x3FFFU] = g_rx_buffer[0];
+            g_usart_rx_sta++;
+            if (g_usart_rx_sta > (USART_REC_LEN - 1U)) g_usart_rx_sta = 0U;
+        }
+    }
+    HAL_UART_Receive_IT(&g_uart1_handle, g_rx_buffer, RXBUFFERSIZE);
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance != USART_UX) return;
+    if (g_tx_count != 0U)
+    {
+        g_tx_tail = (uint8_t)((g_tx_tail + 1U) % USART_TX_QUEUE_DEPTH);
+        g_tx_count--;
+    }
+    g_tx_busy = 0U;
+    usart_tx_start_next();
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    uint32_t error;
+    if (huart->Instance != USART_UX) return;
+    error = HAL_UART_GetError(huart);
+    g_tx_error_count++;
+
+    /* RX line errors must not discard a DMA-owned TX frame. */
+    if ((error & HAL_UART_ERROR_DMA) != 0U)
+    {
+        if (g_tx_busy != 0U && g_tx_count != 0U)
+        {
+            g_tx_tail = (uint8_t)((g_tx_tail + 1U) % USART_TX_QUEUE_DEPTH);
+            g_tx_count--;
+        }
+        g_tx_busy = 0U;
+        usart_tx_start_next();
+    }
+    else
+    {
+        HAL_UART_Receive_IT(&g_uart1_handle, g_rx_buffer, RXBUFFERSIZE);
     }
 }
 
-/**
- * @brief       串口1中断服务函数
- * @param       无
- * @retval      无
- */
+void DMA2_Stream7_IRQHandler(void)
+{
+    HAL_DMA_IRQHandler(&g_uart1_tx_dma);
+}
+
 void USART_UX_IRQHandler(void)
-{ 
-#if SYS_SUPPORT_OS                              /* 使用OS */
-    OSIntEnter();    
+{
+#if SYS_SUPPORT_OS
+    OSIntEnter();
 #endif
-
-    HAL_UART_IRQHandler(&g_uart1_handle);       /* 调用HAL库中断处理公用函数 */
-
-#if SYS_SUPPORT_OS                              /* 使用OS */
+    HAL_UART_IRQHandler(&g_uart1_handle);
+#if SYS_SUPPORT_OS
     OSIntExit();
 #endif
 }
-
-#endif
-
-
- 
-
- 
-
-
-
-

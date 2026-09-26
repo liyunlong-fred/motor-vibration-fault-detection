@@ -8,10 +8,10 @@
 | --- | --- | --- |
 | [`delay/`](delay/delay.h) | 毫秒/微秒延时驱动，支持 OS 场景 | 为 MPU6050、软件 IIC 等底层时序提供延时接口 |
 | [`sys/`](sys/sys.h) | 系统时钟、GPIO 配置和中断管理相关基础定义 | 为基础外设与板级驱动提供系统级支撑 |
-| [`usart/`](usart/usart.h) | USART 驱动与 `printf` 重定向 | 为板端日志、调试输出和上行串口链路提供基础支持 |
+| [`usart/`](usart/usart.h) | USART 驱动、`printf` 重定向和 TX DMA 队列 | 为板端日志、调试输出和上行串口链路提供异步发送支持 |
 
 ## 使用边界
 
 - 采样频率、窗口长度、数据源和串口波特率由 [`../../APP/app_config.h`](../../APP/app_config.h) 统一定义，不在此目录重复配置。
-- 上层串口帧格式由 [`../../APP/link_frame.h`](../../APP/link_frame.h) 定义；本目录的 `usart/` 只负责底层发送与调试输出。
+- 上层串口帧格式由 [`../../APP/link_frame.h`](../../APP/link_frame.h) 定义；本目录的 `usart/` 维护 TX DMA 队列，不解释帧内容。
 - 当前工程对该目录的调用关系见 [工程总览](../../README.md) 和 [系统地图](../../../知识库/20_系统地图.md)。
