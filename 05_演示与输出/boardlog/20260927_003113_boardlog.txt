@@ -1,0 +1,5 @@
+dsp_fft_init OK: N=1024, df=0.9766 Hz, cpu=168 MHz
+capture=fifo_continuous fs=1000 N=1024
+CAL_MEAN seq=1 first=0 n=1024 x=701 y=16473 z=185
+CAL_MEAN seq=2 first=1024 n=1024 x=703 y=16475 z=191
+CAL_MEAN seq=3 first=2048 n=1024 x=705 y=16473 z=186

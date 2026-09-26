@@ -8,9 +8,35 @@
 #include "./BSP/IIC/iic.h"
 #include "./BSP/MPU6050/mpu6050.h"
 #include "./app_config.h"
+#include "./app_calibration.h"
 #include "./app_sample.h"
 #include "link_frame.h"
 #include "dsp_fft.h"
+
+#if APP_CALIBRATION_MEAN_LOG
+static int32_t window_mean_counts(const int16_t *data, uint16_t n)
+{
+    int32_t sum = 0;
+    uint16_t i;
+
+    if ((data == 0) || (n == 0U)) return 0;
+    for (i = 0U; i < n; i++) sum += data[i];
+    return sum / (int32_t)n;
+}
+
+static void print_calibration_means(const sample_window_t *w)
+{
+    if ((w == 0) || (w->n == 0U)) return;
+
+    APP_LOG("CAL_MEAN seq=%u first=%lu n=%u x=%ld y=%ld z=%ld\r\n",
+            (unsigned)w->seq,
+            (unsigned long)w->first_sample_id,
+            (unsigned)w->n,
+            (long)window_mean_counts(w->x, w->n),
+            (long)window_mean_counts(w->y, w->n),
+            (long)window_mean_counts(w->z, w->n));
+}
+#endif
 
 int main(void)
 {
@@ -46,6 +72,10 @@ int main(void)
         {
             dsp_fft_result_t fft_res;
             dsp_fft_run(w, 'X', &fft_res);
+
+#if APP_CALIBRATION_MEAN_LOG
+            print_calibration_means(w);
+#endif
 
             /* Copy the raw window into the DMA-owned queue before release. */
             (void)link_frame_send(w, 'X');

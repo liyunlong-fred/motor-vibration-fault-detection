@@ -439,6 +439,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\APP\app_debug.c</FilePath>
             </File>
+            <File>
+              <FileName>app_calibration.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\APP\app_calibration.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
