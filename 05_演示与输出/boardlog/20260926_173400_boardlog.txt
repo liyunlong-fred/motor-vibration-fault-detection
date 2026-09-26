@@ -1,0 +1,43 @@
+dsp_fft_init OK: N=1024, df=0.9766 Hz, cpu=168 MHz
+fs=1000 Hz, N=1024, 数据源=MPU6050
+FFT seq=1 n=1024 mean=43 mg cycles=71529 (425 us)
+  #1 bin=27 f=26.37 Hz amp=2 mg
+  #2 bin=56 f=54.69 Hz amp=1 mg
+  #3 bin=113 f=110.35 Hz amp=1 mg
+  #4 bin=50 f=48.83 Hz amp=1 mg
+  #5 bin=185 f=180.66 Hz amp=1 mg
+TIM seq=1 span=1023 miss=0 gap=0 readfail=0
+FFT seq=2 n=1024 mean=43 mg cycles=71529 (425 us)
+  #1 bin=27 f=26.37 Hz amp=2 mg
+  #2 bin=203 f=198.24 Hz amp=1 mg
+  #3 bin=183 f=178.71 Hz amp=1 mg
+  #4 bin=117 f=114.26 Hz amp=1 mg
+  #5 bin=11 f=10.74 Hz amp=1 mg
+TIM seq=2 span=1023 miss=0 gap=51 readfail=0
+FFT seq=3 n=1024 mean=43 mg cycles=71530 (425 us)
+  #1 bin=27 f=26.37 Hz amp=2 mg
+  #2 bin=52 f=50.78 Hz amp=1 mg
+  #3 bin=92 f=89.84 Hz amp=1 mg
+  #4 bin=63 f=61.52 Hz amp=1 mg
+  #5 bin=148 f=144.53 Hz amp=1 mg
+TIM seq=3 span=1023 miss=0 gap=52 readfail=0
+FFT seq=4 n=1024 mean=43 mg cycles=71529 (425 us)
+  #1 bin=27 f=26.37 Hz amp=2 mg
+  #2 bin=165 f=161.13 Hz amp=1 mg
+  #3 bin=113 f=110.35 Hz amp=1 mg
+  #4 bin=47 f=45.90 Hz amp=1 mg
+  #5 bin=34 f=33.20 Hz amp=1 mg
+TIM seq=4 span=1023 miss=0 gap=51 readfail=0
+FFT seq=5 n=1024 mean=43 mg cycles=71529 (425 us)
+  #1 bin=27 f=26.37 Hz amp=2 mg
+  #2 bin=13 f=12.70 Hz amp=1 mg
+  #3 bin=48 f=46.88 Hz amp=1 mg
+  #4 bin=137 f=133.79 Hz amp=1 mg
+  #5 bin=171 f=166.99 Hz amp=1 mg
+TIM seq=5 span=1023 miss=0 gap=51 readfail=0
+FFT seq=6 n=1024 mean=43 mg cycles=71529 (425 us)
+  #1 bin=27 f=26.37 Hz amp=2 mg
+  #2 bin=57 f=55.66 Hz amp=1 mg
+  #3 bin=11 f=10.74 Hz amp=1 mg
+  #4 bin=224 f=218.75 Hz amp=1 mg
+  #5 bin=30 f=29.30 Hz amp=1 mg
