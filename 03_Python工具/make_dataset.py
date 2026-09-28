@@ -5,6 +5,7 @@
 """
 import argparse
 import csv
+import hashlib
 import json
 import os
 import sys
@@ -16,6 +17,14 @@ import metadata
 PROJ = os.path.dirname(_HERE)
 MANIFEST = os.path.join(PROJ, "04_数据集", "manifest.csv")
 DEFAULT_OUT = os.path.join(PROJ, "04_数据集", "processed")
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fp:
+        for block in iter(lambda: fp.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def build_parser():
@@ -39,6 +48,7 @@ def main(argv=None):
         rows = list(reader)
     selected = []
     excluded = {}
+    dataset_root = os.path.dirname(os.path.abspath(args.manifest))
     for row in rows:
         if row.get("data_role") != "formal" or row.get("quality_status") != "pass":
             excluded["not_formal_or_not_pass"] = excluded.get("not_formal_or_not_pass", 0) + 1
@@ -51,6 +61,18 @@ def main(argv=None):
             continue
         if row.get("label_confidence") == "suspect" and not args.include_suspect:
             excluded["suspect"] = excluded.get("suspect", 0) + 1
+            continue
+        relative_file = (row.get("file") or "").replace("/", os.sep).replace("\\", os.sep)
+        file_path = os.path.abspath(os.path.join(dataset_root, relative_file))
+        if not relative_file or os.path.commonpath((dataset_root, file_path)) != dataset_root or not os.path.isfile(file_path):
+            excluded["file_missing"] = excluded.get("file_missing", 0) + 1
+            continue
+        expected_sha256 = (row.get("file_sha256") or "").strip().lower()
+        if len(expected_sha256) != 64 or any(ch not in "0123456789abcdef" for ch in expected_sha256):
+            excluded["file_sha256_missing_or_invalid"] = excluded.get("file_sha256_missing_or_invalid", 0) + 1
+            continue
+        if _sha256_file(file_path) != expected_sha256:
+            excluded["file_sha256_mismatch"] = excluded.get("file_sha256_mismatch", 0) + 1
             continue
         selected.append(dict(row))
     devices = sorted({r.get("device_id", "unknown") for r in selected})

@@ -1,8 +1,9 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "axes": {
     "measurement_axis": "X",
-    "gravity_axis": "Y"
+    "reference_gravity_axis": "Y",
+    "reference_gravity_sign_values": ["+1", "-1"]
   },
   "data_roles": ["formal", "debug", "selftest", "calibration"],
   "source_types": ["real", "synthetic"],
@@ -24,5 +25,13 @@
     "manifest": "04_数据集/manifest.csv",
     "processed_dir": "04_数据集/processed"
   },
-  "excluded_form_fields": ["fixture_version", "sensor_id", "sensor_mount_id"]
+  "required_form_fields": [
+    "fixture_id",
+    "sensor_module_id",
+    "sensor_mount_id",
+    "installation_orientation_id",
+    "reference_gravity_sign",
+    "calibration_id",
+    "firmware_build_id"
+  ]
 }

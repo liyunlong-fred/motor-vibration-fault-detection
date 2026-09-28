@@ -1,12 +1,3 @@
----
-kb_id: PROJECT-README
-kind: overview
-domain: project
-lifecycle: current
-authority: supporting
-last_verified: 2026-09-25
----
-
 # 电机振动故障检测
 
 一个以 **STM32 + MPU6050** 为采集端、以 **Python** 为分析与数据管理端的电机/风扇振动检测项目。

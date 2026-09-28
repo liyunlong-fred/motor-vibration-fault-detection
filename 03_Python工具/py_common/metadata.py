@@ -12,9 +12,9 @@ import os
 import re
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MEASUREMENT_AXIS = "X"
-GRAVITY_AXIS = "Y"
+REFERENCE_GRAVITY_AXIS = "Y"
 
 DATA_ROLES = ("formal", "debug", "selftest", "calibration")
 SOURCE_TYPES = ("real", "synthetic")
@@ -30,21 +30,35 @@ MANIFEST_FIELDS = [
     "target_label", "label_basis", "label_confidence", "fault_level",
     "fault_method", "tape_spec_id", "tape_count", "tape_mass_mg",
     "tape_radius_mm", "tape_angle_deg", "loose_fastener_id", "loosen_turns",
-    "mount_gap_mm", "measurement_axis", "gravity_axis",
-    "voltage_set_v", "voltage_measured_v", "rpm_measured", "fs_hz",
-    "frame_n", "afs_code", "frames", "first_seq", "last_seq", "lost_frames",
-    "window_span_ms", "actual_fs_hz", "firmware_commit", "quality_status",
-    "quality_reason", "dataset_split", "sha256", "notes",
+    "mount_gap_mm", "fixture_id", "sensor_module_id", "sensor_mount_id",
+    "installation_orientation_id", "measurement_axis", "reference_gravity_axis",
+    "reference_gravity_sign", "calibration_id", "voltage_set_v", "voltage_measured_v",
+    "rpm_measured", "fs_config_hz", "window_samples", "window_nominal_ms",
+    "capture_samples", "capture_nominal_ms", "afs_code", "frames", "first_seq",
+    "last_seq", "lost_frames", "sample_id_gaps", "capture_mode", "firmware_build_id",
+    "board_stats_scope", "board_samples_captured", "board_continuity_breaks",
+    "board_fifo_overflow", "board_iic_read_fail", "board_window_drop",
+    "board_tx_drop", "board_tx_err", "board_max_fifo_batch", "quality_status",
+    "quality_reason", "dataset_split", "file_sha256", "notes",
 ]
+
+# These fields describe review and curation after acquisition.  They deliberately
+# live only in manifest.csv; a CSV header is immutable capture evidence.
+HEADER_EXCLUDED_FIELDS = {
+    "file", "quality_status", "quality_reason", "dataset_split", "file_sha256",
+}
 
 _FLOAT_FIELDS = {
     "voltage_set_v", "voltage_measured_v", "rpm_measured", "tape_mass_mg",
     "tape_radius_mm", "tape_angle_deg", "loosen_turns", "mount_gap_mm",
-    "window_span_ms", "actual_fs_hz",
+    "window_nominal_ms", "capture_nominal_ms",
 }
 _INT_FIELDS = {
-    "schema_version", "fault_level", "tape_count", "fs_hz", "frame_n",
-    "afs_code", "frames", "first_seq", "last_seq", "lost_frames",
+    "schema_version", "fault_level", "tape_count", "fs_config_hz", "window_samples",
+    "capture_samples", "afs_code", "frames", "first_seq", "last_seq", "lost_frames",
+    "sample_id_gaps", "board_samples_captured", "board_continuity_breaks",
+    "board_fifo_overflow", "board_iic_read_fail", "board_window_drop",
+    "board_tx_drop", "board_tx_err", "board_max_fifo_batch",
 }
 
 
@@ -129,13 +143,17 @@ def build_capture_meta(args):
         "loosen_turns": getattr(args, "loosen_turns", None),
         "mount_gap_mm": getattr(args, "mount_gap_mm", None),
         "measurement_axis": MEASUREMENT_AXIS,
-        "gravity_axis": GRAVITY_AXIS,
+        "reference_gravity_axis": REFERENCE_GRAVITY_AXIS,
+        "reference_gravity_sign": getattr(args, "reference_gravity_sign", None),
+        "fixture_id": getattr(args, "fixture_id", None),
+        "sensor_module_id": getattr(args, "sensor_module_id", None),
+        "sensor_mount_id": getattr(args, "sensor_mount_id", None),
+        "installation_orientation_id": getattr(args, "installation_orientation_id", None),
+        "calibration_id": getattr(args, "calibration_id", None),
         "voltage_set_v": args.voltage_set_v,
         "voltage_measured_v": args.voltage_measured_v,
         "rpm_measured": args.rpm_measured,
-        "firmware_commit": args.firmware_commit,
-        "quality_status": "pending",
-        "quality_reason": "",
+        "firmware_build_id": getattr(args, "firmware_build_id", None),
         "notes": args.notes,
     })
 
@@ -145,13 +163,15 @@ def validate(meta, require_capture=True):
     m = normalise(meta)
     errors = []
     required = (
-        "schema_version", "data_role", "source_type", "device_id", "session_id",
+        "schema_version", "record_id", "data_role", "source_type", "device_id", "session_id",
         "observed_condition", "target_label", "label_basis", "label_confidence",
-        "measurement_axis", "gravity_axis", "quality_status",
+        "measurement_axis", "reference_gravity_axis",
     )
     for key in required:
         if m.get(key) in (None, ""):
             errors.append("缺少 %s" % key)
+    if m.get("schema_version") not in (None, "") and m.get("schema_version") != SCHEMA_VERSION:
+        errors.append("schema_version 必须为 %d" % SCHEMA_VERSION)
     checks = {
         "data_role": DATA_ROLES,
         "source_type": SOURCE_TYPES,
@@ -159,7 +179,6 @@ def validate(meta, require_capture=True):
         "target_label": TARGET_LABELS,
         "label_basis": LABEL_BASES,
         "label_confidence": LABEL_CONFIDENCE,
-        "quality_status": QUALITY_STATUSES,
     }
     for key, allowed in checks.items():
         if m.get(key) not in (None, "") and m[key] not in allowed:
@@ -170,8 +189,10 @@ def validate(meta, require_capture=True):
                       (m.get("observed_condition"), expected_target))
     if m.get("measurement_axis") != MEASUREMENT_AXIS:
         errors.append("measurement_axis 必须为 X")
-    if m.get("gravity_axis") != GRAVITY_AXIS:
-        errors.append("gravity_axis 必须为 Y")
+    if m.get("reference_gravity_axis") != REFERENCE_GRAVITY_AXIS:
+        errors.append("reference_gravity_axis 必须为 Y")
+    if m.get("reference_gravity_sign") not in (None, "", "+1", "-1"):
+        errors.append("reference_gravity_sign 必须为 +1 或 -1")
     if m.get("source_type") == "real" and m.get("voltage_set_v") is None:
         errors.append("真实风扇必须填写 voltage_set_v")
     if m.get("observed_condition") == "added_mass":
@@ -179,6 +200,10 @@ def validate(meta, require_capture=True):
             errors.append("added_mass 必须填写 fault_level>=1")
         if m.get("tape_count") is None or int(m["tape_count"]) < 1:
             errors.append("added_mass 必须填写 tape_count>=1")
+        if m.get("fault_method") != "tape_mass":
+            errors.append("added_mass 的 fault_method 必须为 tape_mass")
+        if not m.get("tape_spec_id"):
+            errors.append("added_mass 必须填写 tape_spec_id")
     if m.get("observed_condition") == "mount_looseness":
         if m.get("fault_level") is None or int(m["fault_level"]) < 1:
             errors.append("mount_looseness 必须填写 fault_level>=1")
@@ -198,6 +223,18 @@ def validate(meta, require_capture=True):
             errors.append("formal 数据必须说明 label_basis")
         if m.get("label_confidence") == "unknown":
             errors.append("formal 数据必须说明 label_confidence")
+        for key in ("fixture_id", "sensor_module_id", "sensor_mount_id",
+                    "installation_orientation_id", "reference_gravity_sign",
+                    "calibration_id", "firmware_build_id"):
+            if m.get(key) in (None, ""):
+                errors.append("formal 数据必须填写 %s" % key)
+        if m.get("observed_condition") == "baseline":
+            if m.get("fault_level") != 0:
+                errors.append("baseline 必须填写 fault_level=0")
+            if m.get("fault_method") or m.get("tape_spec_id") or m.get("tape_count", 0) != 0:
+                errors.append("baseline 不能填写胶带或故障注入字段")
+            if m.get("loose_fastener_id") or m.get("loosen_turns") or m.get("mount_gap_mm"):
+                errors.append("baseline 不能填写松动注入字段")
     return errors
 
 
@@ -242,7 +279,8 @@ def read_meta(path):
 
 def write_header(fp, meta):
     """把元数据写成CSV注释行，np.loadtxt会自动忽略。"""
-    clean = {k: v for k, v in normalise(meta).items() if v is not None}
+    clean = {k: v for k, v in normalise(meta).items()
+             if v is not None and k not in HEADER_EXCLUDED_FIELDS}
     fp.write("# meta_json=" + json.dumps(clean, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
@@ -262,7 +300,7 @@ def make_filename(meta, axis, first_seq, last_seq):
     )
 
 
-def append_manifest(manifest_path, relative_file, meta):
+def append_manifest(manifest_path, relative_file, meta, file_sha256):
     """只把正式采集写入清单；debug数据由文件头自描述但不进入训练索引。"""
     if meta.get("data_role") != "formal":
         return
@@ -270,6 +308,10 @@ def append_manifest(manifest_path, relative_file, meta):
     exists = os.path.isfile(manifest_path) and os.path.getsize(manifest_path) > 0
     row = {key: "" if meta.get(key) is None else meta.get(key) for key in MANIFEST_FIELDS}
     row["file"] = relative_file.replace("\\", "/")
+    row["quality_status"] = "pending"
+    row["quality_reason"] = ""
+    row["dataset_split"] = ""
+    row["file_sha256"] = file_sha256
     with open(manifest_path, "a", newline="", encoding="utf-8") as fp:
         writer = csv.DictWriter(fp, fieldnames=MANIFEST_FIELDS)
         if not exists:

@@ -8,7 +8,9 @@
 
 import argparse
 import datetime
+import hashlib
 import os
+import re
 import sys
 
 import numpy as np
@@ -28,6 +30,13 @@ FORMAL_DIR = os.path.join(PROJ, "04_数据集", "formal")
 DEBUG_DIR = os.path.join(PROJ, "04_数据集", "debug_raw")
 MANIFEST = os.path.join(PROJ, "04_数据集", "manifest.csv")
 LOG_DIR = os.path.join(PROJ, "05_演示与输出", "boardlog")
+
+_CAP_STATS_RE = re.compile(
+    r"\bCAP\s+samples=(?P<samples>\d+)\s+break=(?P<breaks>\d+)"
+    r"\s+fifo_ovf=(?P<fifo_ovf>\d+)\s+iic_fail=(?P<iic_fail>\d+)"
+    r"\s+win_drop=(?P<win_drop>\d+)\s+tx_drop=(?P<tx_drop>\d+)"
+    r"\s+tx_err=(?P<tx_err>\d+)\s+batch=(?P<batch>\d+)\b"
+)
 
 
 def build_parser():
@@ -63,10 +72,20 @@ def build_parser():
                    help="从基准紧固位置回退的圈数")
     p.add_argument("--mount-gap-mm", type=float,
                    help="安装点可复现间隙，毫米；与回退圈数至少填一项")
+    p.add_argument("--fixture-id", default="", help="刚性夹具的稳定编号，如 rig01")
+    p.add_argument("--sensor-module-id", default="", help="MPU6050 模块稳定编号，如 mpu01")
+    p.add_argument("--sensor-mount-id", default="", help="模块在被测设备上的测点编号")
+    p.add_argument("--installation-orientation-id", default="",
+                   help="安装姿态编号；须能唯一解释测量轴和重力参考轴")
+    p.add_argument("--reference-gravity-sign", choices=("+1", "-1"),
+                   help="静态基准安装时，重力在 Y 参考轴上的符号")
+    p.add_argument("--calibration-id", default="uncalibrated",
+                   help="应用的标定记录编号；当前未补偿时填写 uncalibrated")
     p.add_argument("--voltage-set-v", type=float, required=True)
     p.add_argument("--voltage-measured-v", type=float)
     p.add_argument("--rpm-measured", type=float)
-    p.add_argument("--firmware-commit", default="")
+    p.add_argument("--firmware-build-id", default="",
+                   help="实际烧录固件的提交号或可追溯构建标识")
     p.add_argument("--notes", default="")
     return p
 
@@ -91,6 +110,33 @@ def _open_serial(args):
     ser.rts = False
     ser.reset_input_buffer()
     return ser
+
+
+def _parse_board_stats(line):
+    """解析固件 CAP 文本帧；计数器的语义是自上电以来的累计值。"""
+    match = _CAP_STATS_RE.search(line)
+    if not match:
+        return None
+    values = {key: int(value) for key, value in match.groupdict().items()}
+    return {
+        "board_stats_scope": "since_boot",
+        "board_samples_captured": values["samples"],
+        "board_continuity_breaks": values["breaks"],
+        "board_fifo_overflow": values["fifo_ovf"],
+        "board_iic_read_fail": values["iic_fail"],
+        "board_window_drop": values["win_drop"],
+        "board_tx_drop": values["tx_drop"],
+        "board_tx_err": values["tx_err"],
+        "board_max_fifo_batch": values["batch"],
+    }
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fp:
+        for block in iter(lambda: fp.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def main(argv=None):
@@ -119,6 +165,7 @@ def main(argv=None):
     lost = 0
     expected_sample_id = None
     sample_id_gaps = 0
+    board_stats = None
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(LOG_DIR, exist_ok=True)
     log_path = os.path.join(LOG_DIR, "%s_boardlog.txt" % stamp)
@@ -149,6 +196,9 @@ def main(argv=None):
                     print(line)
                     log_fp.write(line + "\n")
                     log_fp.flush()
+                    parsed_stats = _parse_board_stats(line)
+                    if parsed_stats is not None:
+                        board_stats = parsed_stats
                     continue
                 if seq_last and frame["seq"] != seq_last + 1:
                     miss = frame["seq"] - seq_last - 1
@@ -188,8 +238,11 @@ def main(argv=None):
     all_data = np.concatenate(datas)
     meta.update({
         "measurement_axis": axis,
-        "fs_hz": frames.FS_HZ,
-        "frame_n": int(datas[0].size),
+        "fs_config_hz": frames.FS_HZ,
+        "window_samples": int(datas[0].size),
+        "window_nominal_ms": 1000.0 * datas[0].size / frames.FS_HZ,
+        "capture_samples": int(all_data.size),
+        "capture_nominal_ms": 1000.0 * all_data.size / frames.FS_HZ,
         "afs_code": int(afs_code),
         "frames": len(datas),
         "first_seq": int(seq_first),
@@ -197,9 +250,9 @@ def main(argv=None):
         "lost_frames": int(lost),
         "sample_id_gaps": int(sample_id_gaps),
         "capture_mode": "fifo_continuous",
-        "window_span_ms": 1000.0 * len(datas) * datas[0].size / frames.FS_HZ,
-        "actual_fs_hz": frames.FS_HZ,
     })
+    if board_stats is not None:
+        meta.update(board_stats)
     errors = metadata.validate(meta, require_capture=False)
     if errors:
         print("采集后元数据校验失败，不保存: %s" % "；".join(errors))
@@ -214,8 +267,9 @@ def main(argv=None):
     with open(path, "w", encoding="utf-8") as fp:
         metadata.write_header(fp, meta)
         np.savetxt(fp, all_data, fmt="%d")
+    file_sha256 = _sha256_file(path)
     if args.data_role == "formal":
-        metadata.append_manifest(MANIFEST, os.path.join("formal", filename), meta)
+        metadata.append_manifest(MANIFEST, os.path.join("formal", filename), meta, file_sha256)
 
     print("-" * 56)
     print("共收到 %d 帧，丢帧 %d，样本不连续 %d" %

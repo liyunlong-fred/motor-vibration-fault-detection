@@ -48,8 +48,8 @@ def main(argv=None):
         print("三个数据目录中都没有 csv，请先运行 recv.py")
         return 1
     meta = metadata.read_meta(csv_path)
-    fs = int(meta.get("fs_hz", meta.get("fs", frames.FS_HZ)))
-    n = int(meta.get("frame_n", meta.get("per_frame", frames.MAX_N)))
+    fs = int(meta.get("fs_config_hz", meta.get("fs_hz", meta.get("fs", frames.FS_HZ))))
+    n = int(meta.get("window_samples", meta.get("frame_n", meta.get("per_frame", frames.MAX_N))))
     afs_code = int(meta.get("afs_code", 0))
     axis = meta.get("measurement_axis", meta.get("axis", "?"))
     raw = np.atleast_1d(np.loadtxt(csv_path, comments="#", dtype=np.int16))
@@ -62,11 +62,10 @@ def main(argv=None):
     ac_rms = float(np.sqrt(np.mean(d * d)))
     ac_pp = float(d.max() - d.min())
     print("文件      : %s" % csv_path)
-    print("记录      : %s | 设备 %s | 工况 %s | 标签 %s | 质量 %s" %
+    print("记录      : %s | 设备 %s | 工况 %s | 标签 %s" %
           (meta.get("record_id", "legacy"), meta.get("device_id", "legacy_unknown"),
-           meta.get("observed_condition", "unknown"), meta.get("target_label", "unassigned"),
-           meta.get("quality_status", "unknown")))
-    print("轴号      : %s (测量轴 X，重力轴 Y)" % axis)
+           meta.get("observed_condition", "unknown"), meta.get("target_label", "unassigned")))
+    print("轴号      : %s (测量轴 X，重力参考轴 Y)" % axis)
     print("采样率    : %d Hz   每帧 %d 点   频率分辨率 %.3f Hz/格" % (fs, n, fs / n))
     print("供电      : %s V" % meta.get("voltage_measured_v", meta.get("voltage_set_v", "?")))
     print("交流成分  : RMS %.5f g   峰峰值 %.5f g" % (ac_rms, ac_pp))

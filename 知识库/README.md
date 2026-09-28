@@ -4,7 +4,7 @@ kind: overview
 domain: project
 lifecycle: current
 authority: supporting
-last_verified: 2026-09-25
+last_verified: 2026-09-27
 source_paths:
   - 知识库/00_导航.md
   - 知识库/10_当前状态.md
@@ -23,7 +23,7 @@ source_paths:
 | `_generated/` | 结构检查报告；由脚本生成，不手工编辑 |
 | `模板/` | 新建决策、实验或排查记录的 frontmatter 模板 |
 
-受管 Markdown 必须有 `kb_id`、`kind`、`domain`、`lifecycle`、`authority` 和 `last_verified`。修改受管文档、登记表或正式数据清单后，在项目根目录运行：
+受管 Markdown 必须有 `kb_id`、`kind`、`domain`、`lifecycle`、`authority` 和 `last_verified`；唯独项目根目录的 `README.md` 可省略 frontmatter。该 README 仍是受管入口：会进入索引、校验链接和内容重复；更新它后也必须运行下列命令。修改受管文档、登记表或正式数据清单后，在项目根目录运行：
 
 ```powershell
 python -B 03_Python工具\kb_index.py build

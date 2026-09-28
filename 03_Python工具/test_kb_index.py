@@ -58,11 +58,16 @@ def main() -> int:
         (root / "06_笔记与踩坑" / "旧Vault" / ".obsidian").mkdir(parents=True)
         (root / "知识库" / "索引").mkdir(parents=True)
 
-        (root / "README.md").write_text(
-            managed_note("DUPLICATE", "[broken](missing.md)"), encoding="utf-8"
-        )
+        # 根 README 可无 frontmatter，但必须继续参与链接校验。
+        (root / "README.md").write_text("# Root\n\n[broken](missing.md)\n", encoding="utf-8")
         (root / "01_文档" / "duplicate.md").write_text(
             managed_note("DUPLICATE", ""), encoding="utf-8"
+        )
+        (root / "01_文档" / "duplicate_2.md").write_text(
+            managed_note("DUPLICATE", "different content"), encoding="utf-8"
+        )
+        (root / "01_文档" / "missing_frontmatter.md").write_text(
+            "# Missing frontmatter\n", encoding="utf-8"
         )
         (root / "04_数据集" / "formal" / "sample.csv").write_text("1\n", encoding="utf-8")
         (root / "04_数据集" / "manifest.csv").write_text("file\n", encoding="utf-8")
@@ -72,8 +77,19 @@ def main() -> int:
         issues, *_ = kb_index.validate()
         checks.extend(
             [
+                (
+                    "根 README 可省略 frontmatter",
+                    not any("缺少知识库属性：README.md" in issue for issue in issues),
+                ),
+                (
+                    "其他文档仍需 frontmatter",
+                    any("缺少知识库属性：01_文档/missing_frontmatter.md" in issue for issue in issues),
+                ),
                 ("重复 kb_id", any("重复 kb_id" in issue for issue in issues)),
-                ("断链", any("失效 Markdown 链接" in issue for issue in issues)),
+                (
+                    "根 README 断链",
+                    any("失效 Markdown 链接：README.md" in issue for issue in issues),
+                ),
                 ("manifest 漏登记", any("未登记 manifest" in issue for issue in issues)),
                 ("嵌套 Vault", any("嵌套 Vault" in issue for issue in issues)),
             ]

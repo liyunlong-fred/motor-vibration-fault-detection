@@ -35,6 +35,9 @@ REQUIRED_PROPERTIES = (
     "authority",
     "last_verified",
 )
+# 项目根 README 是对外入口，不使用知识库 frontmatter。它仍属于受管 Markdown：
+# 必须进入索引、参与链接与内容重复检查，以便内容和链接在后续更新中继续受控。
+ROOT_README_NAME = "README.md"
 ALLOWED = {
     "kind": {
         "overview",
@@ -72,6 +75,11 @@ def write_text(path: Path, content: str) -> None:
 
 def normalise_text(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def requires_frontmatter(path: Path) -> bool:
+    """仅项目根 README 可省略知识库 frontmatter。"""
+    return path.resolve() != (ROOT / ROOT_README_NAME).resolve()
 
 
 def managed_markdown_paths() -> list[Path]:
@@ -320,7 +328,7 @@ def validate() -> tuple[list[str], list[dict[str, object]], list[dict[str, str]]
             continue
         properties = parse_frontmatter(text)
         missing = [key for key in REQUIRED_PROPERTIES if not properties.get(key)]
-        if missing:
+        if missing and requires_frontmatter(path):
             issues.append(f"缺少知识库属性：{rel(path)}（{', '.join(missing)}）")
         for key, allowed in ALLOWED.items():
             value = properties.get(key)

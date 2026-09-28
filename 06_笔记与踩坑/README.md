@@ -4,14 +4,14 @@ kind: overview
 domain: project
 lifecycle: current
 authority: canonical
-last_verified: 2026-09-24
+last_verified: 2026-09-28
 ---
 
 # 笔记与踩坑
 
 排查结论和少量有里程碑价值的原始记录可以提交；中间调试文件不要入库。板端串口日志统一存放在[演示与输出/boardlog](../05_演示与输出/README.md)中。
 
-开发问题按独立记录维护，入口见[开发问题与解决记录](开发问题/README.md)。
+开发问题按独立记录维护，入口见[开发问题与解决记录](开发问题/README.md)。可复现实验按 E 编号维护，当前入口见 [E-01 风扇 TACH 逻辑分析仪测速](实验记录/E-01_风扇TACH逻辑分析仪测速.md)。
 
 可复用的技术实施方法和历史验证记录统一存放在[技术实施文档](../01_文档/技术实施/README.md)，避免与临时排查笔记混放。
 

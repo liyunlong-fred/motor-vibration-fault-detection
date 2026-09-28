@@ -31,13 +31,15 @@ def main(argv=None):
     meta = metadata.read_meta(path)
     raw = np.atleast_1d(np.loadtxt(path, comments="#", dtype=np.int16))
     print("文件:", path)
-    print("记录=%s 设备=%s 工况=%s 标签=%s 质量=%s" %
+    print("记录=%s 设备=%s 工况=%s 标签=%s" %
           (meta.get("record_id", "legacy"), meta.get("device_id", "legacy_unknown"),
-           meta.get("observed_condition", "unknown"), meta.get("target_label", "unassigned"),
-           meta.get("quality_status", "unknown")))
-    print("轴=%s/%s 采样率=%sHz 每帧=%s 供电=%sV" %
-          (meta.get("measurement_axis", meta.get("axis", "?")), meta.get("gravity_axis", "?"),
-           meta.get("fs_hz", meta.get("fs", "?")), meta.get("frame_n", meta.get("per_frame", "?")),
+           meta.get("observed_condition", "unknown"), meta.get("target_label", "unassigned")))
+    print("轴=%s/重力参考%s%s 采样率=%sHz 每窗=%s 供电=%sV" %
+          (meta.get("measurement_axis", meta.get("axis", "?")),
+           meta.get("reference_gravity_axis", meta.get("gravity_axis", "?")),
+           meta.get("reference_gravity_sign", ""),
+           meta.get("fs_config_hz", meta.get("fs_hz", meta.get("fs", "?"))),
+           meta.get("window_samples", meta.get("frame_n", meta.get("per_frame", "?"))),
            meta.get("voltage_measured_v", meta.get("voltage_set_v", "?"))))
     print("样本数 %d  最小 %d  最大 %d  均值 %.1f" %
           (raw.size, raw.min(), raw.max(), raw.mean()))

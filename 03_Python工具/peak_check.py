@@ -46,15 +46,14 @@ def main(path):
         print("三个数据目录中都没有 csv，请先运行 recv.py")
         return 1
     meta = metadata.read_meta(path)
-    fs = float(meta.get("fs_hz", meta.get("fs", frames.FS_HZ)))
-    n = int(meta.get("frame_n", meta.get("per_frame", frames.MAX_N)))
+    fs = float(meta.get("fs_config_hz", meta.get("fs_hz", meta.get("fs", frames.FS_HZ))))
+    n = int(meta.get("window_samples", meta.get("frame_n", meta.get("per_frame", frames.MAX_N))))
     afs = int(meta.get("afs_code", 0))
     nframe = int(meta.get("frames", 1))
     first = int(meta.get("first_seq", 1))
-    print("记录=%s 设备=%s 工况=%s 标签=%s 质量=%s" %
+    print("记录=%s 设备=%s 工况=%s 标签=%s" %
           (meta.get("record_id", "legacy"), meta.get("device_id", "legacy_unknown"),
-           meta.get("observed_condition", "unknown"), meta.get("target_label", "unassigned"),
-           meta.get("quality_status", "unknown")))
+           meta.get("observed_condition", "unknown"), meta.get("target_label", "unassigned")))
     d = np.atleast_1d(np.loadtxt(path, comments="#"))
     if d.ndim == 2:
         d = d[:, 0]

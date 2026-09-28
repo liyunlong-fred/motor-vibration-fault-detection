@@ -45,7 +45,7 @@ formal/ + manifest.csv + 质检通过
 make_dataset.py ──► processed/split_manifest.csv、summary.json
 ```
 
-新采集数据固定使用 X 轴作为测量轴、Y 轴作为重力轴。`formal` 数据会自动登记到 `04_数据集/manifest.csv`，初始 `quality_status` 为 `pending`；仅完成质检并改为 `pass` 的记录会进入数据集划分。`debug`、`selftest` 和 `calibration` 均写入 `debug_raw/`，不登记训练清单。旧的 `04_数据集/raw/` 只为兼容历史文件而保留。
+新采集数据固定使用 X 轴作为测量轴、Y 轴作为静态安装重力参考轴，并记录重力正负号。CSV 文件头保存不可变采集事实；`formal` 数据会自动登记到 `04_数据集/manifest.csv`，由该清单保存文件 SHA-256、初始 `quality_status=pending` 与后续划分。仅完成质检并改为 `pass` 的记录会进入数据集划分。`debug`、`selftest` 和 `calibration` 均写入 `debug_raw/`，不登记训练清单。旧的 `04_数据集/raw/` 只为兼容历史文件而保留。
 
 ## 脚本索引
 
@@ -59,9 +59,9 @@ make_dataset.py ──► processed/split_manifest.csv、summary.json
 | `make_dataset.py` | 按设备留出测试集，避免同一设备的数据泄漏 | `manifest.csv` → `04_数据集/processed/split_manifest.csv` 与 `summary.json` |
 | `kb_index.py` | 构建/检查项目知识库索引、链接和正式数据 manifest 一致性 | 写入 `知识库/索引/文档与模块索引.md`、`知识库/_generated/检查报告.md` |
 | `py_common/frames.py` | PC 端串口帧协议唯一实现，以及原始 `int16` 到 `g` 的换算 | 被其他脚本导入，不单独运行 |
-| `py_common/metadata.py` | schema v3 元数据构造、校验、CSV 文件头和 manifest 读写 | 被其他脚本导入，不单独运行 |
+| `py_common/metadata.py` | schema v4 元数据构造、校验、不可变 CSV 文件头和 manifest 读写 | 被其他脚本导入，不单独运行 |
 | `config.json` | 数据角色、标签枚举、工况到类别映射和数据路径的可读配置 | 与 `metadata.py` 的枚举保持一致 |
-| `test_metadata.py` / `test_harmonics.py` / `test_kb_index.py` | 元数据、谐波分析和知识库索引的自检 | 不依赖 pytest；成功时退出码为 0 |
+| `test_metadata.py` / `test_make_dataset.py` / `test_harmonics.py` / `test_kb_index.py` | 元数据、训练清单完整性、谐波分析和知识库索引的自检 | 不依赖 pytest；成功时退出码为 0 |
 
 `peak_check.py.gbk.bak` 是历史编码备份，不参与日常运行。
 
@@ -94,7 +94,7 @@ $Port = 'COM13'
   --port $Port `
   --data-role formal `
   --device-id fanA `
-  --session-id fanA_baseline_9V `
+  --session-id fanA_rig01_9V_20260927_a `
   --run-index 1 `
   --observed-condition baseline `
   --label-basis controlled_injection `
@@ -103,6 +103,13 @@ $Port = 'COM13'
   --tape-count 0 `
   --voltage-set-v 9 `
   --frames 20 `
+  --fixture-id rig01 `
+  --sensor-module-id mpu01 `
+  --sensor-mount-id fan_frame_top `
+  --installation-orientation-id x_measure_y_gravity `
+  --reference-gravity-sign +1 `
+  --calibration-id uncalibrated `
+  --firmware-build-id '替换为实际构建标识' `
   --notes '正常基线，无胶带'
 ```
 
@@ -118,9 +125,10 @@ $Port = 'COM13'
 正式数据还须满足以下规则，否则程序会拒绝保存：
 
 - 不能使用 `observed-condition unknown`；应明确填写 `--label-basis` 和 `--label-confidence`。
-- `added_mass` 需要 `--fault-level 1`（或更高）及 `--tape-count 1`（或更多）。
+- `added_mass` 需要 `--fault-level 1`（或更高）、`--fault-method tape_mass`、`--tape-spec-id` 及 `--tape-count 1`（或更多）。
 - `mount_looseness` 需要故障等级、`--fault-method`、`--loose-fastener-id`，以及正数的 `--loosen-turns` 或 `--mount-gap-mm`。
 - 真实设备须填写 `--voltage-set-v`。
+- `formal` 还必须提供夹具、模块、测点、安装姿态、Y 轴重力参考符号、标定记录和实际固件构建标识；完整示例见采集操作手册。
 
 完整的贴胶带和安装固定处机械松动命令、硬件安全要求及采集后的质检要求，请使用 [采集操作手册](../04_数据集/采集操作手册.md)。
 
@@ -169,7 +177,7 @@ $Csv = '.\04_数据集\debug_raw\替换为实际文件名.csv'
 & $Python .\03_Python工具\make_dataset.py --test-device fanB
 ```
 
-脚本只选择 schema v3、`data_role=formal`、`quality_status=pass`、类别已分配的记录；默认排除 `label_confidence=suspect`。它按 `device_id` 留出一台设备作为测试集，从而避免把同一设备的数据同时放入训练集和测试集。没有指定 `--test-device` 时，至少有两台设备才会自动选择排序最后的设备；设备不足两台时，全部标为训练集。
+脚本只选择 schema v4、`data_role=formal`、`quality_status=pass`、类别已分配且文件 SHA-256 与 manifest 一致的记录；默认排除 `label_confidence=suspect`。它按 `device_id` 留出一台设备作为测试集，从而避免把同一设备的数据同时放入训练集和测试集。没有指定 `--test-device` 时，至少有两台设备才会自动选择排序最后的设备；设备不足两台时，全部标为训练集。
 
 可用参数：
 
@@ -185,6 +193,7 @@ $Csv = '.\04_数据集\debug_raw\替换为实际文件名.csv'
 
 ```powershell
 & $Python .\03_Python工具\test_metadata.py
+& $Python .\03_Python工具\test_make_dataset.py
 & $Python .\03_Python工具\test_harmonics.py
 & $Python .\03_Python工具\test_kb_index.py
 ```
@@ -197,6 +206,7 @@ $Csv = '.\04_数据集\debug_raw\替换为实际文件名.csv'
 ```
 
 `kb_index.py build` 会覆盖两个生成文件；不要手工编辑 `知识库/索引/文档与模块索引.md` 或 `知识库/_generated/检查报告.md`。
+项目根目录的 `README.md` 可不写知识库 frontmatter，但仍会进入索引并校验其链接；更新该文件后同样必须运行上述命令。
 
 ## 数据格式与边界
 

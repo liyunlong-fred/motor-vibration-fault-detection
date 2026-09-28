@@ -406,16 +406,15 @@ def format_report(csv_path, meta, f, amp, nf, result):
     """把结论字典排成给人看的一段文字"""
     r = result
     axis = meta.get("measurement_axis", meta.get("axis", "?"))
-    fs = meta.get("fs_hz", meta.get("fs", "-"))
-    per_frame = meta.get("frame_n", meta.get("per_frame", "-"))
+    fs = meta.get("fs_config_hz", meta.get("fs_hz", meta.get("fs", "-")))
+    per_frame = meta.get("window_samples", meta.get("frame_n", meta.get("per_frame", "-")))
     nf_txt = ("%d 帧" % nf) if nf else "外部谱线"
     L = []
     L.append("================= 谐波族分析 =================")
     L.append("文件        : %s" % csv_path)
-    L.append("记录/工况   : %s / %s -> %s   设备 %s   质量 %s" %
+    L.append("记录/工况   : %s / %s -> %s   设备 %s" %
              (meta.get("record_id", "legacy"), meta.get("observed_condition", "unknown"),
-              meta.get("target_label", "unassigned"), meta.get("device_id", "legacy_unknown"),
-              meta.get("quality_status", "unknown")))
+              meta.get("target_label", "unassigned"), meta.get("device_id", "legacy_unknown")))
     L.append("轴号        : %s        采样率 %s Hz        每帧 %s 点 (平均 %s)"
              % (axis, fs, per_frame, nf_txt))
     L.append("频率分辨率  : %.3f Hz/格        分析频段 %.1f~%.1f Hz        峰阈值 %.1f%% 最大峰"
@@ -615,8 +614,8 @@ def main():
         meta, nf = {"axis": "-", "fs": "-", "per_frame": "-"}, None
     else:
         meta, samples = load_csv(csv_path)
-        fs = int(meta.get("fs_hz", meta.get("fs", frames.FS_HZ)))
-        n = int(meta.get("frame_n", meta.get("per_frame", frames.MAX_N)))
+        fs = int(meta.get("fs_config_hz", meta.get("fs_hz", meta.get("fs", frames.FS_HZ))))
+        n = int(meta.get("window_samples", meta.get("frame_n", meta.get("per_frame", frames.MAX_N))))
         afs_code = int(meta.get("afs_code", 0))
         f, amp, nf = average_spectrum(samples, fs, n, afs_code)
 

@@ -13,11 +13,11 @@ source_paths:
 
 # 正式原始数据（formal）
 
-这里仅存放可审计的正式原始采集 CSV。每份数据都应由 `03_Python工具/recv.py --data-role formal` 写入：文件首行包含 `# meta_json=...`，并在上级 `manifest.csv` 追加同一记录的索引行。
+这里仅存放可审计的正式原始采集 CSV。每份数据都应由 `03_Python工具/recv.py --data-role formal` 写入：文件首行包含不可变的 `# meta_json=...` 采集事实，并在上级 `manifest.csv` 追加同一记录的索引行、文件 SHA-256 与初始质检状态。
 
 当前目录尚没有正式 CSV；`.gitkeep` 用于保留空目录。不要将调试、合成、未知工况或历史 `raw/` 文件复制到这里，也不要手工改写 CSV 的元数据头或文件名。
 
-采集完成后先执行数据检查，再只在 `manifest.csv` 中更新该记录的 `quality_status` 与 `quality_reason`：
+采集完成后先执行数据检查，再只在 `manifest.csv` 中更新该记录的 `quality_status` 与 `quality_reason`；不要改写 CSV 文件头：
 
 - `pending`：待判断，不能训练；
 - `pass`：样本、标签和现场记录均可信，可被 `make_dataset.py` 选入；

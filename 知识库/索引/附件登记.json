@@ -38,5 +38,13 @@
     "path": "05_演示与输出/20260922_175755_fan9v_unbalance_X_f0001-0020_spectrum.png",
     "role": "2× 分量增强的频谱证据",
     "distribution": "project"
+  },
+  {
+    "id": "EVIDENCE-FAN-TACH-EDGE-INTERVAL",
+    "name": "风扇 TACH 相邻下降沿间隔",
+    "domain": "hardware",
+    "path": "05_演示与输出/logic_analyzer/20260928_fan_tach_edge_interval.png",
+    "role": "逻辑分析仪测得 6.881083 ms 周期与约 50% 占空比的原始截图",
+    "distribution": "project"
   }
 ]

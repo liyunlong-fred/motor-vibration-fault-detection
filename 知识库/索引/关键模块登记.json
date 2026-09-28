@@ -74,7 +74,7 @@
     "name": "数据元数据契约",
     "domain": "data",
     "path": "03_Python工具/py_common/metadata.py",
-    "role": "schema v3 校验、机械松动量化字段、CSV 头和 manifest"
+    "role": "schema v4 校验、机械松动量化与采集溯源字段、不可变 CSV 头和 manifest"
   },
   {
     "id": "PC-CONFIG",
@@ -88,6 +88,6 @@
     "name": "训练清单生成",
     "domain": "data",
     "path": "03_Python工具/make_dataset.py",
-    "role": "筛选通过质检的正式样本"
+    "role": "筛选通过质检且文件完整性匹配的正式样本"
   }
 ]
