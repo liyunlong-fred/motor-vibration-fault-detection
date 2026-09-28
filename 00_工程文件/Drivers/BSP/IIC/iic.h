@@ -36,6 +36,7 @@
                           }while(0)       //设定 数据线 的高低电平：x=1为高电平；x=0为低电平
 
 #define IIC_READ_SDA     HAL_GPIO_ReadPin(IIC_SDA_GPIO_PORT, IIC_SDA_GPIO_PIN) /* 读取数据 */
+#define IIC_READ_SCL     HAL_GPIO_ReadPin(IIC_SCL_GPIO_PORT, IIC_SCL_GPIO_PIN) /* read clock line */
 
 /******************************************************************************************/
 
@@ -44,6 +45,7 @@
 /* 函数 定义 */
 
 void iic_init(void);            /* 初始化IIC的IO口 */
+uint8_t iic_bus_recover(void);  /* 0=bus released */
 void iic_start(void);           /* 发送IIC开始信号 */
 void iic_stop(void);            /* 发送IIC停止信号 */
 uint8_t iic_wait_ack(void);     /* IIC等待ACK信号 */

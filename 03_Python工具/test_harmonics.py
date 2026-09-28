@@ -63,7 +63,7 @@ def case_1_two_harmonics():
     """T1: 45 Hz 基频 + 90 Hz 二次谐波(幅值 5:1) —— 规划文档里合成桩函数的那组数"""
     print("T1  45Hz 基频 + 90Hz 二次谐波 (幅值比 5:1)")
     counts = make_counts(45.0, {1: 0.50, 2: 0.10})
-    r, _, _ = analyze_counts(counts)
+    r, _, _ = analyze_counts(counts, f0_min=40.0)
 
     check("T1.1 基频 ≈ 45 Hz", r["f0"] is not None and abs(r["f0"] - 45.0) <= 1.0,
           "实测 f0 = %.2f Hz" % (r["f0"] if r["f0"] else -1.0))
@@ -90,26 +90,21 @@ def case_2_fan_like_1x_and_4x():
     check("T2.4 转速 ≈ 4728 rpm", abs(r["rpm"] - 78.8 * 60.0) <= 90.0, "实测 %.0f rpm" % r["rpm"])
 
 
-def case_3_even_only_ambiguity():
-    """T3: 只有偶数倍频(2× 最强、没有 1×) —— 数学上 39.4 Hz 和 78.8 Hz 都能解释,
-           工具必须把这层歧义写进报告, 不能默不作声地给一个转速"""
-    print("T3  只有偶数倍频: 2×(1.00) 4×(0.12) 6×(0.06) 8×(0.83)")
+def case_3_low_subharmonic_not_selected():
+    """T3: 旧工具会把 39.4 Hz 子谐波反推成基频；新规则只承认已验证的 1×范围。"""
+    print("T3  39.4Hz 子谐波 + 78.8Hz 主峰 —— 默认必须选 78.8Hz")
     counts = make_counts(39.4, {2: 1.00, 4: 0.12, 6: 0.06, 8: 0.83})
     r, f, amp = analyze_counts(counts)
 
-    check("T3.1 找到了能罩住这些峰的基频族", r["f0"] is not None, "f0 = %.2f Hz" % (r["f0"] if r["f0"] else -1.0))
-    check("T3.2 谐波阶层数 ≥ 2", len(r["harmonics"]) >= 2, "匹配到 %d 个峰" % len(r["harmonics"]))
+    check("T3.1 默认基频 ≈ 78.8 Hz", r["f0"] is not None and abs(r["f0"] - 78.8) <= 1.5,
+          "f0 = %.2f Hz" % (r["f0"] if r["f0"] else -1.0))
+    check("T3.2 39.4 Hz 不会成为默认机械 1×", r["f0"] is not None and r["f0"] >= harmonics.DEFAULT_F0_MIN,
+          "f0 = %.2f Hz" % (r["f0"] if r["f0"] else -1.0))
 
     meta = {"axis": "Z", "fs": str(FS), "per_frame": str(N), "afs_code": "0"}
     text = harmonics.format_report("syn_39.4.csv", meta, f, amp, FRAMES, r)
-    check("T3.3 报告里写明了 f0 与 f0/2 无法区分", ("一半" in text) and ("2×" in text),
-          "报告含歧义提示")
-
-    half = r["f0"] / 2.0
-    check("T3.4 报告给出的另一半可能 ≈ 39.4 Hz", abs(half - 39.4) <= 1.5, "f0/2 = %.2f Hz" % half)
-    check("T3.5 候选基频表里列出了 f0/2 这个假设",
-          r["half"] is not None and abs(r["half"]["f0"] - 39.4) <= 1.5 and ("假设)" in text),
-          "half 候选 = %.2f Hz" % (r["half"]["f0"] if r["half"] else -1.0))
+    check("T3.3 报告明确排除低频子谐波", "36.6 Hz 一类低频峰不再参与默认基频候选" in text,
+          "报告含新判据")
 
 
 def case_4_pure_noise():
@@ -152,53 +147,48 @@ def case_5_csv_roundtrip():
         f, amp, nf = harmonics.average_spectrum(samples, int(meta["fs_hz"]), int(meta["frame_n"]),
                                                 int(meta["afs_code"]))
         check("T5.3 平均了 20 帧", nf == FRAMES, "nf = %d" % nf)
-        r = harmonics.analyze(f, amp)
+        r = harmonics.analyze(f, amp, f0_min=40.0)
         check("T5.4 基频 ≈ 45 Hz", r["f0"] is not None and abs(r["f0"] - 45.0) <= 1.0,
               "f0 = %.2f Hz" % (r["f0"] if r["f0"] else -1.0))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)      # 自检不留垃圾
 
 
-def case_6_supply_band_weak_1x():
-    """T6: 供电频段先验 —— 9V 工况下真实 1× 很弱、2× 最强
-    合成 36.62Hz 的 1×(幅值只占最大峰的 2%)与很强的 2×(73.24Hz)。
-    不给频段先验时, 工具会被幅值高的 2× 带偏(把 2× 当 1×);
-    给出 9V 应有频段(12V 铭牌 2300~3500rpm 按 9/12 折算)后, 应改判真正的 1×。"""
-    print("T6  9V 工况: 1×(36.6Hz, 只占 2%) + 2×(73.2Hz, 最强) —— 频段先验救回弱 1×")
-    counts = make_counts(36.62, {1: 0.008, 2: 0.40, 3: 0.02, 4: 0.15, 5: 0.02, 6: 0.08})
-    f, amp, nf = harmonics.average_spectrum(counts, FS, N)
-
-    strict = harmonics.find_peaks(f, amp, 10, 400, 0.08)
-    check("T6.0 弱 1× 在常规阈值下不算峰(所以要靠频段内放宽阈值)",
-          not any(abs(p[0] - 36.6) <= 1.5 for p in strict),
-          "常规阈值峰数 = %d" % len(strict))
-
-    r_off = harmonics.analyze(f, amp)                                   # 关闭频段先验(旧版行为)
-    r_on = harmonics.analyze(f, amp, rpm_range=(2300.0, 3500.0), supply=[9.0])
-    check("T6.1 无频段先验时被强 2× 带偏(演示原问题)",
-          r_off["f0"] is not None and abs(r_off["f0"] - 73.24) <= 2.5,
-          "f0 = %.2f Hz" % (r_off["f0"] if r_off["f0"] else -1.0))
-    check("T6.2 给 9V 频段后改判 1× ≈ 36.6 Hz",
-          r_on["f0"] is not None and abs(r_on["f0"] - 36.62) <= 1.5,
-          "f0 = %.2f Hz" % (r_on["f0"] if r_on["f0"] else -1.0))
-    check("T6.3 改判后 f0 落在 9V 频段内",
-          bool(r_on["f0_band"]), "命中电压 = %s" % r_on["f0_band"])
-    check("T6.4 改判后转速 ≈ 2197 rpm(而不是被带偏时的 4395)",
-          r_on["f0"] is not None and abs(r_on["rpm"] - 36.62 * 60.0) <= 90.0,
-          "%.0f rpm" % (r_on["rpm"] if r_on["rpm"] else -1.0))
+def case_6_tach_locks_mechanical_1x():
+    """T6: 73.2 Hz 是机械 1×，36.6 Hz 是低频分量；TACH 必须锁定正确转速。"""
+    print("T6  TACH 4360 rpm → 72.663 Hz，频谱峰 73.2 Hz；36.6 Hz 不得成为基频")
+    counts = make_counts(36.62, {1: 0.04, 2: 0.40, 3: 0.03, 4: 0.15, 5: 0.02, 6: 0.08})
+    r, _, _ = analyze_counts(counts, rpm_measured=4359.8)
+    check("T6.1 TACH 锁定机械 1× ≈ 72.663 Hz",
+          r["f0"] is not None and abs(r["f0"] - 72.663) <= 0.01,
+          "f0 = %.3f Hz" % (r["f0"] if r["f0"] else -1.0))
+    check("T6.2 TACH 锁定转速 ≈ 4360 rpm",
+          r["rpm"] is not None and abs(r["rpm"] - 4359.8) <= 0.1,
+          "rpm = %.1f" % (r["rpm"] if r["rpm"] else -1.0))
+    check("T6.3 谱峰与 TACH 1× 对齐", r["one_x_detected"] is True and
+          r["f0_peak"] is not None and abs(r["f0_peak"] - 73.24) <= 1.5,
+          "peak = %.2f Hz" % (r["f0_peak"] if r["f0_peak"] else -1.0))
+    r_6, _, _ = analyze_counts(make_counts(51.02, {1: 0.5, 2: 0.1}))
+    r_12, _, _ = analyze_counts(make_counts(91.74, {1: 0.5, 2: 0.1}))
+    check("T6.4 默认范围覆盖 6V 实测 1× ≈ 51.02 Hz",
+          r_6["f0"] is not None and abs(r_6["f0"] - 51.02) <= 1.5,
+          "f0 = %.2f Hz" % (r_6["f0"] if r_6["f0"] else -1.0))
+    check("T6.5 默认范围覆盖 12V 实测 1× ≈ 91.74 Hz",
+          r_12["f0"] is not None and abs(r_12["f0"] - 91.74) <= 1.5,
+          "f0 = %.2f Hz" % (r_12["f0"] if r_12["f0"] else -1.0))
 
 
-def case_7_supply_from_name():
-    """T7: --supply auto 从文件名里认供电电压(数据命名约定 ..._fan9v_...)"""
-    print("T7  文件名 → 供电电压识别")
-    check("T7.1 fan9v 认出 9V",
-          harmonics.guess_supply_from_name("20260922_175755_fan9v_unbalance_X.csv") == [9.0], "")
-    check("T7.2 fan6v 认出 6V", harmonics.guess_supply_from_name("a_fan6v_b.csv") == [6.0], "")
-    check("T7.3 fan12v 认出 12V", harmonics.guess_supply_from_name("a_fan12v_b.csv") == [12.0], "")
-    check("T7.4 文件名没有电压信息时返回空(交给 auto 全电压段)",
-          harmonics.guess_supply_from_name("20260921_170215_notag_Z.csv") == [], "")
-    check("T7.5 --supply none 关闭频段先验", harmonics.parse_supply("none", "x_fan9v.csv") == [], "")
-    check("T7.6 --supply 6,9 解析成两个电压", harmonics.parse_supply("6,9") == [6.0, 9.0], "")
+def case_7_rpm_parsing():
+    """T7: 实测 RPM 只接受正数，避免空值/错误值悄悄污染基频。"""
+    print("T7  实测 RPM 解析")
+    check("T7.1 空 RPM 保持为空", harmonics.parse_rpm("") is None, "")
+    check("T7.2 数字 RPM 能解析", harmonics.parse_rpm("3061") == 3061.0, "")
+    try:
+        harmonics.parse_rpm(0)
+        invalid_rejected = False
+    except ValueError:
+        invalid_rejected = True
+    check("T7.3 0 rpm 会被拒绝", invalid_rejected, "")
 
 
 def main():
@@ -206,11 +196,11 @@ def main():
     print("-" * 64)
     case_1_two_harmonics()
     case_2_fan_like_1x_and_4x()
-    case_3_even_only_ambiguity()
+    case_3_low_subharmonic_not_selected()
     case_4_pure_noise()
     case_5_csv_roundtrip()
-    case_6_supply_band_weak_1x()
-    case_7_supply_from_name()
+    case_6_tach_locks_mechanical_1x()
+    case_7_rpm_parsing()
     print("-" * 64)
 
     bad = [x for x in _results if not x[1]]

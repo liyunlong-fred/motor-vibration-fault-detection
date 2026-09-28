@@ -54,7 +54,7 @@ def main(path):
     print("记录=%s 设备=%s 工况=%s 标签=%s" %
           (meta.get("record_id", "legacy"), meta.get("device_id", "legacy_unknown"),
            meta.get("observed_condition", "unknown"), meta.get("target_label", "unassigned")))
-    d = np.atleast_1d(np.loadtxt(path, comments="#"))
+    d = np.atleast_1d(np.loadtxt(path, comments="#", encoding="utf-8-sig"))
     if d.ndim == 2:
         d = d[:, 0]
     g = frames.to_g(d, afs)

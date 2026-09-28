@@ -22,7 +22,7 @@ import frames
 import metadata
 
 PROJ = os.path.dirname(_HERE)
-DEFAULT_PORT = "COM13"
+DEFAULT_PORT = "COM17"
 DEFAULT_BAUD = 460800
 DEFAULT_FRAMES = 20
 AXIS_EXPECT = metadata.MEASUREMENT_AXIS
@@ -139,7 +139,13 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
-def main(argv=None):
+def main(argv=None, result_out=None, stop_event=None):
+    """执行一次采集。
+
+    ``result_out`` 是可选的可变映射，供图形化/批处理调用方取得这一次
+    明确生成的文件路径和接收统计。命令行行为和退出码保持不变，不能靠
+    "最新文件"推断本次结果。``stop_event`` 由图形界面的强制结束按钮设置。
+    """
     args = build_parser().parse_args(argv)
     if args.frames < 1:
         print("--frames 必须大于 0")
@@ -166,6 +172,7 @@ def main(argv=None):
     expected_sample_id = None
     sample_id_gaps = 0
     board_stats = None
+    forced_stop = False
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(LOG_DIR, exist_ok=True)
     log_path = os.path.join(LOG_DIR, "%s_boardlog.txt" % stamp)
@@ -173,6 +180,10 @@ def main(argv=None):
 
     try:
         while len(datas) < args.frames:
+            if stop_event is not None and stop_event.is_set():
+                print("\n[强制停止]")
+                forced_stop = True
+                break
             chunk = ser.read(ser.in_waiting or 1)
             if chunk:
                 buf += chunk
@@ -229,6 +240,9 @@ def main(argv=None):
         log_fp.close()
         print("日志已保存: %s" % log_path)
 
+    if forced_stop:
+        print("本次采集已取消，不保存部分数据")
+        return 1
     if not datas:
         print("没有收到任何帧，不保存")
         return 1
@@ -270,6 +284,16 @@ def main(argv=None):
     file_sha256 = _sha256_file(path)
     if args.data_role == "formal":
         metadata.append_manifest(MANIFEST, os.path.join("formal", filename), meta, file_sha256)
+
+    if result_out is not None:
+        result_out.update({
+            "path": path,
+            "meta": meta,
+            "frames": len(datas),
+            "lost_frames": lost,
+            "sample_id_gaps": sample_id_gaps,
+            "board_log_path": log_path,
+        })
 
     print("-" * 56)
     print("共收到 %d 帧，丢帧 %d，样本不连续 %d" %

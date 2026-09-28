@@ -235,6 +235,19 @@
 
 /* 写 0x1C ACCEL_CONFIG 用的值: AFS_SEL 在 bit4:3, 其余位(自检/高通)都为 0 */
 #define MPU6050_ACCEL_CONFIG_VAL    (MPU6050_ACCEL_FS_SEL << 3)
+/* Initialization stages written to the serial boot diagnostic. */
+#define MPU6050_INIT_OK                  0U
+#define MPU6050_INIT_RESET_WRITE_FAIL    1U
+#define MPU6050_INIT_WHO_READ_FAIL       2U
+#define MPU6050_INIT_WHO_INVALID         3U
+#define MPU6050_INIT_WAKE_WRITE_FAIL     4U
+#define MPU6050_INIT_PWR2_WRITE_FAIL     5U
+#define MPU6050_INIT_RATE_WRITE_FAIL     6U
+#define MPU6050_INIT_CONFIG_WRITE_FAIL   7U
+#define MPU6050_INIT_ACCEL_WRITE_FAIL    8U
+#define MPU6050_INIT_FIFO_SETUP_FAIL     9U
+#define MPU6050_INIT_POWER_READ_FAIL    10U
+#define MPU6050_INIT_SLEEP_STILL_SET    11U
 
 /* ==================== 数据类型 ==================== */
 typedef struct
@@ -249,6 +262,7 @@ typedef struct
 
 /* ==================== 函数声明 ==================== */
 uint8_t mpu6050_init(void);                             /* 0=成功, 其他=失败步骤号 */
+const char *mpu6050_init_error_name(uint8_t code);
 uint8_t mpu6050_who_am_i(void);                         /* 读器件ID */
 uint8_t mpu6050_read_raw(mpu6050_raw_t *raw);
 uint8_t mpu6050_fifo_reset(void);

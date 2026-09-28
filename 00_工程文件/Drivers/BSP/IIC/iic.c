@@ -27,7 +27,7 @@ void iic_init(void)
     //——————————————————————————————
         //时钟线配置：
     gpio_init_struct_SCL.Pin = IIC_SCL_GPIO_PIN;
-    gpio_init_struct_SCL.Mode = GPIO_MODE_OUTPUT_PP;        /* 推挽输出 */
+    gpio_init_struct_SCL.Mode = GPIO_MODE_OUTPUT_OD;        /* open drain */
     gpio_init_struct_SCL.Pull = GPIO_PULLUP;                /* 上拉 */
     gpio_init_struct_SCL.Speed = GPIO_SPEED_FREQ_VERY_HIGH; /* 快速 */
 
@@ -44,8 +44,7 @@ void iic_init(void)
     
     /* SDA引脚模式设置,开漏输出,上拉, 这样就不用再设置IO方向了,
     开漏输出的时候(=1), 也可以读取外部信号的高低电平 */
-
-    iic_stop();     /* 停止总线上所有设备 */
+    (void)iic_bus_recover();
     
 }
 
@@ -60,6 +59,29 @@ void iic_init(void)
 static void iic_delay(void)
 {
     delay_us(2);    /* 2us的延时, 读写速度在250Khz以内 */
+}
+
+/* Release a bus held by a resetting slave; 1=SCL low, 2=SDA low. */
+uint8_t iic_bus_recover(void)
+{
+    uint8_t pulse;
+
+    IIC_SDA(1);
+    IIC_SCL(1);
+    iic_delay();
+    if (!IIC_READ_SCL) return 1;
+
+    for (pulse = 0U; (pulse < 9U) && !IIC_READ_SDA; pulse++)
+    {
+        IIC_SCL(0);
+        iic_delay();
+        IIC_SCL(1);
+        iic_delay();
+        if (!IIC_READ_SCL) return 1;
+    }
+    iic_stop();
+    iic_delay();
+    return IIC_READ_SDA ? 0 : 2;
 }
 
 
@@ -118,8 +140,9 @@ uint8_t iic_wait_ack(void)
     while (IIC_READ_SDA)    /* 等待应答 */
     {
         waittime++;
+        iic_delay();
 
-        if (waittime > 250)
+        if (waittime > 100)
         {
             iic_stop();
             rack = 1;

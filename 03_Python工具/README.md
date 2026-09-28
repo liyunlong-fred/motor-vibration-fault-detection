@@ -51,6 +51,7 @@ make_dataset.py ──► processed/split_manifest.csv、summary.json
 
 | 文件 | 用途 | 输入与输出 |
 | --- | --- | --- |
+| `capture_and_analyze.py` | 交互式统一入口：填写标签、采集、分析与质检 | Tk 窗体 → 复用 `recv.py` 采集本次 CSV → 自动显示时域/频谱/稳定性图、TOP-5 峰和谐波结论；图保存到 `05_演示与输出/debug/` |
 | `recv.py` | 接收固件串口帧、校验标签并落盘 | 串口 → `formal/` 或 `debug_raw/` 的自描述 CSV；正式数据追加到 `manifest.csv`，板端文本日志写到 `05_演示与输出/boardlog/` |
 | `check_raw.py` | 快速检查 CSV 元数据、样本数量、范围和负值比例 | 指定 CSV，或自动选择数据目录中最新 CSV；只读 |
 | `plot_check.py` | 绘制首帧时域和单边幅值谱 | 指定 CSV，或自动选择最新 CSV；PNG 写入 `05_演示与输出/` |
@@ -65,14 +66,28 @@ make_dataset.py ──► processed/split_manifest.csv、summary.json
 
 `peak_check.py.gbk.bak` 是历史编码备份，不参与日常运行。
 
+## 统一采集与自动分析：`capture_and_analyze.py`
+
+日常采集推荐从项目根目录运行：
+
+```powershell
+& .\.conda\python.exe .\03_Python工具\capture_and_analyze.py
+```
+
+窗口将采集流程合并为一次会话：填写事实性标签和溯源信息，确认硬件已准备后自动接收指定帧数；完成后只分析**本次明确生成的 CSV**，不会靠“最新文件”猜测。当前固定工装会预填 `mpu01`、`fan_frame_top_left` 和 `x_measure_y_gravity`，但更换模块、测点或姿态时必须先改正。结果窗口显示技术完整性提示、平均谱 TOP-5、逐窗 RMS/主峰稳定性、谐波族报告及三联图，并把图保存到 `05_演示与输出/debug/`。
+
+采集进行中可点“强制结束本次采集”（或直接关闭窗口）：程序会在最多一个串口读取超时后关闭串口，取消本次写盘，随后可立即再次采集。
+
+可选择四种既有数据角色：`debug`（调试）、`formal`（正式）、`selftest`（链路自检）和 `calibration`（标定）。`formal` 模式会强制沿用 schema v4 的校验，并在结果页提供 `pending` / `pass` / `reject` 的 manifest 质检操作。自动检查只覆盖轴向、丢帧、样本连续性和已收到的板端累计统计；风扇是否位移、受控故障是否真实、标签是否可信必须由操作者确认。谐波推断同样不能代替独立 TACH 对拍。
+
 ## 1. 接收数据：`recv.py`
 
-固件以 460800 baud 输出二进制帧。默认端口为 `COM13`、默认采集 20 帧；每帧 1024 个 `int16` 原始计数，采样率为 1 kHz。先关闭串口助手等可能占用端口的程序。
+固件以 460800 baud 输出二进制帧。默认端口为 `COM17`、默认采集 20 帧；每帧 1024 个 `int16` 原始计数，采样率为 1 kHz。先关闭串口助手等可能占用端口的程序。
 
 例如，采集一段调试数据：
 
 ```powershell
-$Port = 'COM13'
+$Port = 'COM17'
 & $Python .\03_Python工具\recv.py `
   --port $Port `
   --data-role debug `
@@ -154,20 +169,25 @@ $Csv = '.\04_数据集\debug_raw\替换为实际文件名.csv'
 
 `plot_check.py` 会弹出图窗，并在 `05_演示与输出/` 保存 `*_spectrum.png`。`harmonics.py --plot` 同样会显示并保存标注 `1×/2×/...` 的 `*_harmonics.png`。
 
-谐波分析默认使用 10–400 Hz 的频段、最多 10 阶倍频，并可借助额定转速和供电电压的先验减小“强 2× 被误判为 1×”的风险：
+谐波分析默认使用 10–400 Hz 的频段、最多 10 阶倍频。本风扇的机械 1× 已由 TACH
+确认在约 50–100 Hz（默认候选范围为 45–105 Hz）；工具只会从该范围内的实际谱峰选择
+1×，不再用铭牌转速或供电电压外推，也不再把约 36.6 Hz 的低频分量反推为机械基频。
+若 CSV 记录了同设备、同供电、同工况的 `rpm_measured`，该值优先，机械 1×固定为
+`RPM / 60`，再核对谱峰和倍频：
 
 ```powershell
-# 按指定 9 V 工况分析，并输出带谐波标记的图
-& $Python .\03_Python工具\harmonics.py $Csv --supply 9 --plot
+# 使用同工况 TACH 测得的 3061 RPM 锁定 1×，并输出带谐波标记的图
+& $Python .\03_Python工具\harmonics.py $Csv --rpm-measured 3061 --plot
 
 # 输入已计算的两列频谱 CSV（频率 Hz、幅值）
 & $Python .\03_Python工具\harmonics.py .\spectrum.csv --spectrum
 
-# 关闭供电频段先验
-& $Python .\03_Python工具\harmonics.py $Csv --supply none
+# 仅在新的 TACH 证据支持时调整已验证设备的 1×搜索范围
+& $Python .\03_Python工具\harmonics.py $Csv --f0min 45 --f0max 105
 ```
 
-谐波结果是辅助验证，不能单独证明机械 1×；存在只有偶次谐波或峰本底比低时，报告会提示不确定性，应结合独立测速或变电压谱线跟踪确认。
+谐波结果仍不能替代独立测速。没有 `rpm_measured` 时，报告的是已验证范围内的频谱估计；
+只有同工况 TACH/转速计记录才能确认机械 1×和 RPM。
 
 ## 3. 生成数据集划分
 

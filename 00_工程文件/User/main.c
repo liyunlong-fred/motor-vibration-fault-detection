@@ -42,6 +42,12 @@ int main(void)
 {
     uint16_t windows_since_stats = 0U;
 
+#if !APP_USE_FAKE_ACCEL
+    uint8_t mpu_init_code;
+    uint8_t iic_recover_code;
+    uint8_t mpu_attempt = 0U;
+#endif
+
     HAL_Init();
     sys_stm32_clock_init(336, 8, 2, 7);
     delay_init(168);
@@ -51,11 +57,21 @@ int main(void)
 
 #if !APP_USE_FAKE_ACCEL
     iic_init();
-    if (mpu6050_init() != 0)
+    do
     {
-        APP_LOG("MPU6050 init failed\r\n");
-        while (1) {}
-    }
+        mpu_attempt++;
+        iic_recover_code = iic_bus_recover();
+        mpu_init_code = (iic_recover_code == 0U) ? mpu6050_init() : 0xFFU;
+        APP_LOG("MPU6050 init attempt=%u bus=%u stage=%s(%u) whoami=0x%02X\r\n",
+                (unsigned)mpu_attempt, (unsigned)iic_recover_code,
+                mpu6050_init_error_name(mpu_init_code), (unsigned)mpu_init_code,
+                (unsigned)mpu6050_who_am_i());
+        if (mpu_init_code != MPU6050_INIT_OK)
+        {
+            APP_LOG("MPU6050 unavailable; retrying in 1 s (check PB6/PB7, 3.3 V and GND)\r\n");
+            delay_ms(1000);
+        }
+    } while (mpu_init_code != MPU6050_INIT_OK);
 #endif
 
     APP_LOG("capture=fifo_continuous fs=%u N=%u\r\n", APP_FS_HZ, APP_FRAME_N);

@@ -29,7 +29,8 @@ def main(argv=None):
         print("找不到 CSV")
         return 1
     meta = metadata.read_meta(path)
-    raw = np.atleast_1d(np.loadtxt(path, comments="#", dtype=np.int16))
+    raw = np.atleast_1d(np.loadtxt(path, comments="#", dtype=np.int16,
+                                  encoding="utf-8-sig"))
     print("文件:", path)
     print("记录=%s 设备=%s 工况=%s 标签=%s" %
           (meta.get("record_id", "legacy"), meta.get("device_id", "legacy_unknown"),

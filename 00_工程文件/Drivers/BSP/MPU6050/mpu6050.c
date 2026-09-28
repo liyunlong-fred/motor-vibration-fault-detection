@@ -12,15 +12,35 @@ uint8_t mpu6050_who_am_i(void)
 {
     uint8_t id = 0xFF;
 
-    iic_reg_read_length(MPU6050_ADDR, MPU6050_WHO_AM_I, &id, 1);
+    if (iic_reg_read_length(MPU6050_ADDR, MPU6050_WHO_AM_I, &id, 1)) return 0xFF;
     return id;
+}
+
+const char *mpu6050_init_error_name(uint8_t code)
+{
+    switch (code)
+    {
+        case MPU6050_INIT_OK: return "ok";
+        case MPU6050_INIT_RESET_WRITE_FAIL: return "reset_write";
+        case MPU6050_INIT_WHO_READ_FAIL: return "who_read";
+        case MPU6050_INIT_WHO_INVALID: return "who_invalid";
+        case MPU6050_INIT_WAKE_WRITE_FAIL: return "wake_write";
+        case MPU6050_INIT_PWR2_WRITE_FAIL: return "pwr2_write";
+        case MPU6050_INIT_RATE_WRITE_FAIL: return "rate_write";
+        case MPU6050_INIT_CONFIG_WRITE_FAIL: return "config_write";
+        case MPU6050_INIT_ACCEL_WRITE_FAIL: return "accel_write";
+        case MPU6050_INIT_FIFO_SETUP_FAIL: return "fifo_setup";
+        case MPU6050_INIT_POWER_READ_FAIL: return "power_read";
+        case MPU6050_INIT_SLEEP_STILL_SET: return "sleep_still_set";
+        default: return "unknown";
+    }
 }
 
 /**
  * @brief       初始化MPU6050
  * @param       无
  * @retval      0, 成功
- *              1~8, 失败, 数字代表卡在第几步
+ *              non-zero: see MPU6050_INIT_*
  */
 uint8_t mpu6050_init(void)
 {
@@ -28,38 +48,38 @@ uint8_t mpu6050_init(void)
     uint8_t tmp = 0;
 
     /* --- 1. 软复位, 让芯片回到已知状态 --- */
-    if (iic_reg_write(MPU6050_ADDR, MPU6050_PWR_MGMT_1, 0x80)) return 1;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_PWR_MGMT_1, 0x80)) return MPU6050_INIT_RESET_WRITE_FAIL;
     delay_ms(100);                          /* 复位后需等待寄存器稳定 */
 
     /* --- 2. 认芯片: 宽松判据, 只有 0x00/0xFF 才算真的没通信 --- */
-    id = mpu6050_who_am_i();
-    if (id == 0x00 || id == 0xFF) return 2;
+    if (iic_reg_read_length(MPU6050_ADDR, MPU6050_WHO_AM_I, &id, 1)) return MPU6050_INIT_WHO_READ_FAIL;
+    if (id == 0x00 || id == 0xFF) return MPU6050_INIT_WHO_INVALID;
     /* 兼容芯片可能报 0x60/0x70/0x72/0x98 等, 只记录不判死 */
 
     /* --- 3. 唤醒 + 时钟源选 X 轴陀螺 PLL (复位后是 0x40 睡眠态) --- */
-    if (iic_reg_write(MPU6050_ADDR, MPU6050_PWR_MGMT_1, 0x01)) return 3;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_PWR_MGMT_1, 0x01)) return MPU6050_INIT_WAKE_WRITE_FAIL;
     delay_ms(100);
-    iic_reg_write(MPU6050_ADDR, 0x68, 0x07);                  /* 陀螺+加速度+温度 信号链复位 */
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_PWR_MGMT_2, 0x07)) return MPU6050_INIT_PWR2_WRITE_FAIL;                  /* 陀螺+加速度+温度 信号链复位 */
     delay_ms(100);
-    iic_reg_write(MPU6050_ADDR, MPU6050_PWR_MGMT_1, 0x01);    /* 复位后重新唤醒 */
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_PWR_MGMT_1, 0x01)) return MPU6050_INIT_WAKE_WRITE_FAIL;    /* 复位后重新唤醒 */
     delay_ms(50);
     /* --- 4. 采样率: DLPF关闭时陀螺输出 8kHz, 8k/(1+7) = 1kHz --- */
-    if (iic_reg_write(MPU6050_ADDR, MPU6050_SMPLRT_DIV, 0x07)) return 4;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_SMPLRT_DIV, 0x07)) return MPU6050_INIT_RATE_WRITE_FAIL;
 
     /* --- 5. DLPF: CFG=0 -> 低通滤波档位，加速度带宽 260Hz(最大), 延迟 0 --- */
-    if (iic_reg_write(MPU6050_ADDR, MPU6050_CONFIG, 0x00)) return 5;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_CONFIG, 0x00)) return MPU6050_INIT_CONFIG_WRITE_FAIL;
 
     /* --- 6. 量程: 值由头文件决定, 不自检, 关闭高通 --- */
-    if (iic_reg_write(MPU6050_ADDR, MPU6050_ACCEL_CONFIG, MPU6050_ACCEL_CONFIG_VAL)) return 6;
+    if (iic_reg_write(MPU6050_ADDR, MPU6050_ACCEL_CONFIG, MPU6050_ACCEL_CONFIG_VAL)) return MPU6050_INIT_ACCEL_WRITE_FAIL;
 
     /* --- 7. 回读校验: 只要 SLEEP 位(bit6)清了就算成功 --- */
     /* Configure accelerometer-only FIFO before capture starts. */
-    if (mpu6050_fifo_reset() != 0) return 7;
+    if (mpu6050_fifo_reset() != 0) return MPU6050_INIT_FIFO_SETUP_FAIL;
 
-    if (iic_reg_read_length(MPU6050_ADDR, MPU6050_PWR_MGMT_1, &tmp, 1)) return 7;
-    if (tmp & 0x40) return 8;               /* 还在睡眠 -> 写没生效 */
+    if (iic_reg_read_length(MPU6050_ADDR, MPU6050_PWR_MGMT_1, &tmp, 1)) return MPU6050_INIT_POWER_READ_FAIL;
+    if (tmp & 0x40) return MPU6050_INIT_SLEEP_STILL_SET;               /* 还在睡眠 -> 写没生效 */
 
-    return 0;
+    return MPU6050_INIT_OK;
 }
 
 /**

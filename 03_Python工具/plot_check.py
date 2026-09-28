@@ -52,7 +52,8 @@ def main(argv=None):
     n = int(meta.get("window_samples", meta.get("frame_n", meta.get("per_frame", frames.MAX_N))))
     afs_code = int(meta.get("afs_code", 0))
     axis = meta.get("measurement_axis", meta.get("axis", "?"))
-    raw = np.atleast_1d(np.loadtxt(csv_path, comments="#", dtype=np.int16))
+    raw = np.atleast_1d(np.loadtxt(csv_path, comments="#", dtype=np.int16,
+                                  encoding="utf-8-sig"))
     if raw.size < n:
         print("样本数不足一帧(%d < %d)" % (raw.size, n))
         return 1
